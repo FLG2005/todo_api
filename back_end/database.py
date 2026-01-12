@@ -1,13 +1,17 @@
 import sqlite3
+from pathlib import Path
 from typing import Optional
 
-DB_FILE = "todo.db"
+# Always store the database next to this file so the API uses one consistent DB
+DB_FILE = Path(__file__).resolve().with_name("todo.db")
 
 
 def connect() -> sqlite3.Connection:
     """Create a SQLite connection to todo.db with safe defaults enabled."""
     # This creates todo.db in the same folder if it doesn't exist yet.
-    conn = sqlite3.connect(DB_FILE)
+    # check_same_thread=False allows the connection to be used across different threads,
+    # which is necessary for FastAPI's async handling.
+    conn = sqlite3.connect(str(DB_FILE), check_same_thread=False)
 
     # Makes rows behave like dictionaries (row["text"]) instead of tuples (row[1]).
     conn.row_factory = sqlite3.Row
@@ -276,7 +280,18 @@ def update_settings(conn: sqlite3.Connection, theme: str, view: str, selected_li
 
 def list_lists(conn: sqlite3.Connection) -> list[dict]:
     """Return all todo lists."""
-    cursor = conn.execute("SELECT id, name FROM lists ORDER BY id ASC;")
+    cursor = conn.execute(
+        """
+        SELECT
+          l.id,
+          l.name,
+          COUNT(t.id) AS task_count
+        FROM lists l
+        LEFT JOIN todos t ON t.list_id = l.id
+        GROUP BY l.id, l.name
+        ORDER BY l.id ASC;
+        """
+    )
     return [dict(row) for row in cursor.fetchall()]
 
 

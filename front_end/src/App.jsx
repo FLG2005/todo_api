@@ -886,10 +886,16 @@ function CollapsibleTask({ todo, relatedLabel, onOpen, onDelete, formatDeadline,
 
 function CollapsibleList({ list, isSelected, onOpen, onRename, onDelete, onSummarise, summary }) {
   const [open, setOpen] = useState(false);
+  const taskCount = typeof list.task_count === "number" ? list.task_count : 0;
+  const taskLabel = `${taskCount} ${taskCount === 1 ? "task" : "tasks"}`;
   return (
-    <article className={`task-card ${isSelected ? "active-card" : ""} ${open ? "open" : ""}`} onClick={() => setOpen(!open)}>
+    <article
+      className={`task-card list-card ${isSelected ? "active-card" : ""} ${open ? "open" : ""}`}
+      onClick={() => setOpen(!open)}
+    >
       <div className="task-meta">
         <span className="badge">List</span>
+        <span className="list-count">{taskLabel}</span>
         {isSelected ? <span>Selected</span> : null}
       </div>
       <div className="task-row">
