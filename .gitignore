@@ -1,0 +1,62 @@
+.DS_Store
+
+# ========================
+# Python / Backend ignores
+# ========================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Unit test / coverage reports
+.pytest_cache/
+.coverage
+htmlcov/
+
+# SQLite / local databases
+*.sqlite3
+*.db
+todo.db
+
+# VS Code / IDE settings
+.vscode/
+.idea/
+
+# Local config / environment
+*.env
+*.local
+
+# Logs
+*.log
+
+# =========================
+# Node / React / Frontend
+# =========================
+
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Vite / build outputs
+dist/
+build/
+
+# Frontend env files
+*.env.development
+*.env.production
+*.env.local
+
