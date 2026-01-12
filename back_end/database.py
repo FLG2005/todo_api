@@ -49,6 +49,7 @@ def create_todos_table(conn: sqlite3.Connection) -> None:
             related_id INTEGER,
             list_id INTEGER NOT NULL DEFAULT 1,
             deadline TEXT,
+            completed INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (list_id) REFERENCES lists(id) ON DELETE CASCADE
         );
     """)
@@ -61,6 +62,9 @@ def create_todos_table(conn: sqlite3.Connection) -> None:
     conn.execute("UPDATE todos SET list_id = 1 WHERE list_id IS NULL;")
     if "deadline" not in cols:
         conn.execute("ALTER TABLE todos ADD COLUMN deadline TEXT;")
+    if "completed" not in cols:
+        conn.execute("ALTER TABLE todos ADD COLUMN completed INTEGER NOT NULL DEFAULT 0;")
+        conn.execute("UPDATE todos SET completed = 0 WHERE completed IS NULL;")
     conn.commit()
 
 def create_settings_table(conn: sqlite3.Connection) -> None:
@@ -94,7 +98,7 @@ def create_settings_table(conn: sqlite3.Connection) -> None:
 def add_todo(conn: sqlite3.Connection, text: str, related_id: Optional[int] = None, list_id: int = 1, deadline: Optional[str] = None) -> int:
     """Insert a new todo and return its auto-generated id."""
     cursor = conn.execute(
-        "INSERT INTO todos (text, related_id, list_id, deadline) VALUES (?, ?, ?, ?);",
+        "INSERT INTO todos (text, related_id, list_id, deadline, completed) VALUES (?, ?, ?, ?, 0);",
         (text, related_id, list_id, deadline)
     )
     conn.commit()
@@ -106,7 +110,7 @@ def add_todo(conn: sqlite3.Connection, text: str, related_id: Optional[int] = No
 def list_todos(conn: sqlite3.Connection):
     """Return all todos ordered by id as dictionaries."""
     cursor = conn.execute(
-        "SELECT id, text, related_id, list_id, deadline FROM todos ORDER BY id ASC;"
+        "SELECT id, text, related_id, list_id, deadline, completed FROM todos ORDER BY id ASC;"
     )
     rows = cursor.fetchall()
     return [dict(row) for row in rows]
@@ -115,7 +119,7 @@ def list_todos(conn: sqlite3.Connection):
 def list_todos_for_list(conn: sqlite3.Connection, list_id: int):
     """Return todos for a specific list ordered by id."""
     cursor = conn.execute(
-        "SELECT id, text, related_id, list_id, deadline FROM todos WHERE list_id = ? ORDER BY id ASC;",
+        "SELECT id, text, related_id, list_id, deadline, completed FROM todos WHERE list_id = ? ORDER BY id ASC;",
         (list_id,)
     )
     return [dict(row) for row in cursor.fetchall()]
@@ -148,6 +152,16 @@ def update_todo_deadline(conn: sqlite3.Connection, todo_id: int, deadline: Optio
     cursor = conn.execute(
         "UPDATE todos SET deadline = ? WHERE id = ?;",
         (deadline, todo_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def update_todo_completed(conn: sqlite3.Connection, todo_id: int, completed: bool) -> bool:
+    """Update completion flag for a todo."""
+    cursor = conn.execute(
+        "UPDATE todos SET completed = ? WHERE id = ?;",
+        (1 if completed else 0, todo_id)
     )
     conn.commit()
     return cursor.rowcount > 0

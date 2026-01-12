@@ -23,6 +23,7 @@ from database import (
     delete_list,
     fetch_list,
     update_todo_deadline,
+    update_todo_completed,
 )
 
 
@@ -225,8 +226,8 @@ def delete_a_todo(id: int, db=Depends(get_db)):
 
 
 @app.put('/edit_a_todo')
-def edit_a_todo(id: int, text: str | None = None, deadline: str | None = None, db=Depends(get_db)):
-    if text is None and deadline is None:
+def edit_a_todo(id: int, text: str | None = None, deadline: str | None = None, completed: bool | None = None, db=Depends(get_db)):
+    if text is None and deadline is None and completed is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Nothing to update"
@@ -261,6 +262,13 @@ def edit_a_todo(id: int, text: str | None = None, deadline: str | None = None, d
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to update deadline"
                 )
+        if completed is not None:
+            completed_success = update_todo_completed(db, id, completed)
+            if not completed_success:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to update completion"
+                )
         return {
             "edited": True,
             "message": f"Todo with id {id} updated successfully"
@@ -275,9 +283,17 @@ def edit_a_todo(id: int, text: str | None = None, deadline: str | None = None, d
 
 
 @app.post('/summarise_todos')
-def summarise(db=Depends(get_db)):
+def summarise(list_id: int | None = None, db=Depends(get_db)):
     try:
-        list_of_todos = list_todos(db)
+        if list_id is not None:
+            if fetch_list(db, list_id) is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"List with id {list_id} not found"
+                )
+            list_of_todos = list_todos_for_list(db, list_id)
+        else:
+            list_of_todos = list_todos(db)
         if not list_of_todos:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

@@ -7,9 +7,16 @@ const themes = {
   space: { className: "theme-space", label: "Space" }
 };
 
+const themePreviews = {
+  default: { bg: "#f5f8ff", border: "#1f4bff" },
+  cozy: { bg: "#fff3e3", border: "#c47c4a" },
+  minimal: { bg: "#f7f7f8", border: "#1f2937" },
+  space: { bg: "#0f1429", border: "#6ac7ff" }
+};
+
 const views = ["front", "lists", "detail"];
 const viewLabels = {
-  front: "Main Menu",
+  front: "Home",
   lists: "My Lists",
   detail: "Individual List"
 };
@@ -90,13 +97,27 @@ export default function App() {
   const [selectedListId, setSelectedListId] = useState(null);
   const [todos, setTodos] = useState([]);
   const [selected, setSelected] = useState(null);
-  const [summary, setSummary] = useState("Click \"AI summary\" to plan your day.");
+  const [summary, setSummary] = useState("Select a list to view its summary.");
+  const [listSummaries, setListSummaries] = useState({});
   const [recommendations, setRecommendations] = useState("Generate ideas related to the selected task.");
   const [relatedTodos, setRelatedTodos] = useState([]);
   const [deletePrompt, setDeletePrompt] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [listPrompt, setListPrompt] = useState(null);
   const [createDeadline, setCreateDeadline] = useState({ date: "", time: "" });
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [settingsHoverOpen, setSettingsHoverOpen] = useState(false);
+  const [closeMenuTimeout, setCloseMenuTimeout] = useState(null);
+  const [closeSettingsTimeout, setCloseSettingsTimeout] = useState(null);
+  const [settingsThemeOpen, setSettingsThemeOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (closeMenuTimeout) clearTimeout(closeMenuTimeout);
+      if (closeSettingsTimeout) clearTimeout(closeSettingsTimeout);
+    };
+  }, [closeMenuTimeout, closeSettingsTimeout]);
 
   useEffect(() => {
     const themeClass = themes[theme]?.className || themes.default.className;
@@ -121,6 +142,7 @@ export default function App() {
   useEffect(() => {
     if (selectedListId) {
       loadTodos();
+      updateSummaryText(selectedListId);
     }
   }, [view, selectedListId]);
 
@@ -196,6 +218,7 @@ export default function App() {
       const params = new URLSearchParams({ list_id: selectedListId });
       const data = await api.json(api.url(`/todo_list?${params.toString()}`));
       setTodos(data);
+      updateSummaryText(selectedListId);
     } catch (err) {
       setTodos([]);
       console.error(err);
@@ -247,6 +270,7 @@ export default function App() {
   const selectList = (id) => {
     setSelectedListId(id);
     changeView("detail");
+    updateSummaryText(id);
   };
 
   async function handleCreate(e) {
@@ -286,6 +310,19 @@ export default function App() {
       await loadTodos();
     } catch (err) {
       alert(`Delete failed: ${err.message}`);
+    }
+  }
+
+  async function toggleComplete(id, completed) {
+    try {
+      const params = new URLSearchParams({ id, completed });
+      await api.json(api.url(`/edit_a_todo?${params.toString()}`), { method: "PUT" });
+      await loadTodos();
+      if (selectedTodo?.id === id) {
+        await selectTodo(id);
+      }
+    } catch (err) {
+      console.error("Unable to update task", err);
     }
   }
 
@@ -380,36 +417,151 @@ export default function App() {
     }
   }
 
+  async function summariseList(listId) {
+    setListSummaries((prev) => ({ ...prev, [listId]: "Summarising..." }));
+    try {
+      const text = await api.text(api.url(`/summarise_todos?list_id=${listId}`), { method: "POST" });
+      setListSummaries((prev) => ({ ...prev, [listId]: text }));
+      if (listId === selectedListId) {
+        setSummary(text);
+      }
+    } catch (err) {
+      const msg = `Unable to summarise: ${err.message}`;
+      setListSummaries((prev) => ({ ...prev, [listId]: msg }));
+      if (listId === selectedListId) {
+        setSummary(msg);
+      }
+    }
+  }
+
+  const updateSummaryText = (listId) => {
+    if (listId && listSummaries[listId]) {
+      setSummary(listSummaries[listId]);
+    }
+  };
+
   return (
     <div className="app">
-      <header>
-        <div className="brand">
-          <h1>Menu</h1>
-          <p>Select a vibe and manage tasks without losing focus.</p>
-          <nav className="nav-inline">
-            {views.map((v) => (
+      <div className="layout">
+        <div className="content-area">
+          <div className="launcher-stack">
+            <div
+              className="launcher-item"
+              onMouseEnter={() => {
+                if (closeMenuTimeout) clearTimeout(closeMenuTimeout);
+                setMenuOpen(true);
+              }}
+              onMouseLeave={() => {
+                const timeout = setTimeout(() => setMenuOpen(false), 120);
+                setCloseMenuTimeout(timeout);
+              }}
+            >
               <button
-                key={v}
-                className={`nav-button ${view === v ? "active" : ""}`}
-                onClick={() => changeView(v)}
+                className="settings-launcher-rect"
+                aria-label="Open menu"
+                title="Open menu"
+                onClick={() => setMenuOpen(true)}
               >
-                {v === "detail" && currentList ? `${currentList.name} tasks` : viewLabels[v]}
+                Menu
               </button>
-            ))}
-          </nav>
-        </div>
-      </header>
+              {menuOpen && (
+                <div className="menu-dropdown">
+                  <button
+                    className={`nav-button full ${view === "front" ? "active" : ""}`}
+                    onClick={() => {
+                      changeView("front");
+                      setMenuOpen(true);
+                    }}
+                  >
+                    Home
+                  </button>
+                  <button
+                    className={`nav-button full ${view === "lists" ? "active" : ""}`}
+                    onClick={() => {
+                      changeView("lists");
+                      setMenuOpen(true);
+                    }}
+                  >
+                    My Lists
+                  </button>
+                  <button
+                    className={`nav-button full ${view === "detail" ? "active" : ""}`}
+                    onClick={() => {
+                      changeView("detail");
+                      setMenuOpen(true);
+                    }}
+                  >
+                    Individual list
+                  </button>
+                </div>
+              )}
+            </div>
 
-      <button
-        className="settings-launcher"
-        onClick={() => setShowSettings(true)}
-        aria-label="Open settings"
-        title="Settings"
-      >
-        <GearIcon />
-      </button>
+            <div
+              className="launcher-item"
+              onMouseEnter={() => {
+                if (closeSettingsTimeout) clearTimeout(closeSettingsTimeout);
+                setSettingsHoverOpen(true);
+              }}
+              onMouseLeave={() => {
+                setSettingsThemeOpen(false);
+                const timeout = setTimeout(() => setSettingsHoverOpen(false), 120);
+                setCloseSettingsTimeout(timeout);
+              }}
+            >
+              <button
+                className="settings-launcher"
+                onClick={() => setShowSettings(true)}
+                aria-label="Open settings"
+                title="Settings"
+              >
+                <GearIcon />
+              </button>
+              {settingsHoverOpen && (
+                <div className="settings-dropdown">
+                  <div className="dropdown-section">
+                    <div className="dropdown-label">Theme</div>
+                    <div className="dropdown-theme-select">
+                      <button
+                        className="dropdown-theme-toggle"
+                        onClick={() => setSettingsThemeOpen((o) => !o)}
+                        aria-haspopup="listbox"
+                        aria-expanded={settingsThemeOpen}
+                      >
+                        <span className="dropdown-theme-label">Theme</span>
+                        <span className="dropdown-theme-current">{themes[theme]?.label}</span>
+                      </button>
+                      {settingsThemeOpen && (
+                        <div className="dropdown-theme-options" role="listbox">
+                          {Object.entries(themes).map(([key, info]) => (
+                            <button
+                              key={key}
+                              className={`dropdown-theme-option ${theme === key ? "active" : ""}`}
+                              onClick={() => {
+                                setTheme(key);
+                              }}
+                              role="option"
+                            >
+                              <span
+                                className="theme-chip"
+                                style={{ background: themePreviews[key]?.bg, borderColor: themePreviews[key]?.border }}
+                              />
+                              <span>{info.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <button className="nav-button full" onClick={() => setShowSettings(true)}>
+                    Open settings
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
 
-      <main>
+          <main>
         <section className={view === "front" ? "active" : ""} id="front">
           <div className="hero">
             <div>
@@ -417,7 +569,6 @@ export default function App() {
               <p>The experience adapts across every page—front, lists, and individual items—so your flow and task outlines stay consistent.</p>
               <div className="cta-buttons">
                 <button className="button" onClick={() => changeView("lists")}>Open my lists</button>
-                <button className="button secondary" onClick={summariseTodos}>AI summary</button>
               </div>
               <div className="panel-grid">
                 <div className="panel">
@@ -432,7 +583,6 @@ export default function App() {
             </div>
             <ThemeScene theme={theme} />
           </div>
-          <div className="status">{summary}</div>
         </section>
 
         <section className={view === "lists" ? "active" : ""} id="lists">
@@ -452,20 +602,16 @@ export default function App() {
           <div className="list">
             {lists.length === 0 && <div className="status">No lists yet. Create one to get started.</div>}
             {lists.map((list) => (
-              <article key={list.id} className={`task-card ${selectedListId === list.id ? "active-card" : ""}`}>
-                <div className="task-meta">
-                  <span className="badge">List</span>
-                  <span>{selectedListId === list.id ? "Selected" : ""}</span>
-                </div>
-                <div className="list-row">
-                  <strong>{list.name}</strong>
-                </div>
-                <div className="actions">
-                  <button className="button secondary" onClick={() => selectList(list.id)}>Open</button>
-                  <button className="ghost" onClick={() => setListPrompt({ mode: "rename", list })}>Rename</button>
-                  <button className="ghost" onClick={() => setListPrompt({ mode: "delete", list })}>Delete</button>
-                </div>
-              </article>
+              <CollapsibleList
+                key={list.id}
+                list={list}
+                isSelected={selectedListId === list.id}
+                onOpen={() => selectList(list.id)}
+                onRename={() => setListPrompt({ mode: "rename", list })}
+                onDelete={() => setListPrompt({ mode: "delete", list })}
+                onSummarise={() => summariseList(list.id)}
+                summary={listSummaries[list.id]}
+              />
             ))}
           </div>
         </section>
@@ -475,51 +621,59 @@ export default function App() {
           {selectedListId && (
             <>
               <div className="split">
-                <div className="panel">
-                  <h3>Create a todo</h3>
-                  <p className="muted">Working in: {currentList?.name || "List"}</p>
-                  <form id="createForm" onSubmit={handleCreate}>
-                    <input name="newText" type="text" placeholder="Task text" required />
-                    <select name="newRelatedSelect" defaultValue="">
-                      <option value="">No related task</option>
-                      {todos.map((todo) => (
-                        <option key={todo.id} value={todo.id}>
-                          {todo.text}
-                        </option>
-                      ))}
-                    </select>
-                    <DeadlineSelect
-                      dateOptions={dateOptions}
-                      timeOptions={timeOptions}
-                      value={createDeadline}
-                      onChange={setCreateDeadline}
-                      label="Deadline (optional)"
-                    />
-                    <button type="submit" className="button">Add task</button>
-                  </form>
-                </div>
-                <div className="panel">
-                  <h3>Tasks in this list</h3>
-                  <div className="list">
-                    {todos.length === 0 && <div className="status">No tasks yet in this list.</div>}
-                    {todos.map((todo) => (
-                      <article key={todo.id} className="task-card">
-                        <div className="task-meta">
-                          <span className="badge">Task</span>
-                          <span>{todo.related_id ? `Related: ${getTaskNameById(todo.related_id) || "Unknown"}` : "No relation"}</span>
-                        </div>
-                        <div>{todo.text}</div>
-                        <p className="muted">{formatDeadline(todo.deadline)}</p>
-                        <div className="actions">
-                          <button className="button secondary" onClick={() => selectTodo(todo.id)}>Open</button>
-                          <button className="ghost" onClick={() => setDeletePrompt(todo)}>Delete</button>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
+                <div className="panel create-panel">
+                  <button
+                    className="collapse-header"
+                    onClick={() => setCreateOpen((o) => !o)}
+                    type="button"
+                  >
+                    <span>Create a task</span>
+                    <span className="collapse-icon">{createOpen ? "−" : "+"}</span>
+                  </button>
+                  {createOpen && (
+                    <>
+                      <p className="muted">Working in: {currentList?.name || "List"}</p>
+                      <form id="createForm" onSubmit={handleCreate}>
+                        <input name="newText" type="text" placeholder="Task text" required />
+                        <select name="newRelatedSelect" defaultValue="">
+                          <option value="">No related task</option>
+                          {todos.map((todo) => (
+                            <option key={todo.id} value={todo.id}>
+                              {todo.text}
+                            </option>
+                          ))}
+                        </select>
+                        <DeadlineSelect
+                          dateOptions={dateOptions}
+                          timeOptions={timeOptions}
+                          value={createDeadline}
+                          onChange={setCreateDeadline}
+                          label="Deadline (optional)"
+                        />
+                        <button type="submit" className="button">Add task</button>
+                      </form>
+                    </>
+                  )}
                 </div>
               </div>
-          <div className="split">
+          <div className="detail-body">
+            <aside className="tasks-sidebar">
+              <h3>Tasks in this list</h3>
+              <div className="list">
+                {todos.length === 0 && <div className="status">No tasks yet in this list.</div>}
+                {todos.map((todo) => (
+                <CollapsibleTask
+                  key={todo.id}
+                  todo={todo}
+                  relatedLabel={todo.related_id ? `Related: ${getTaskNameById(todo.related_id) || "Unknown"}` : ""}
+                  onOpen={() => selectTodo(todo.id)}
+                  onDelete={() => setDeletePrompt(todo)}
+                  formatDeadline={formatDeadline}
+                  onToggleComplete={toggleComplete}
+                />
+              ))}
+            </div>
+          </aside>
             <div>
               <h3>Selected todo</h3>
               <p className="muted">Current list: {currentList?.name || "None"}</p>
@@ -528,8 +682,8 @@ export default function App() {
                 <div className="panel-grid">
                   <div className="panel">
                     <h3>{selectedTodo.text}</h3>
-                    <p>{selectedTodo.related_id ? `Related to ${getTaskNameById(selectedTodo.related_id) || "Unknown"}` : "Related: none"}</p>
-                    <p className="muted">{formatDeadline(selectedTodo.deadline)}</p>
+                    {selectedTodo.related_id ? <p>{`Related to ${getTaskNameById(selectedTodo.related_id) || "Unknown"}`}</p> : null}
+                    {selectedTodo.deadline ? <p className="muted">{formatDeadline(selectedTodo.deadline)}</p> : null}
                     <div className="actions">
                       <button className="button secondary" onClick={loadRecommendations}>Recommendations</button>
                       <button className="button secondary" onClick={loadRelated}>Fetch related</button>
@@ -544,13 +698,13 @@ export default function App() {
                     onSave={saveRelated}
                     excludeId={selectedTodo.id}
                   />
-                  <DeadlinePicker
-                    title="Update deadline"
-                    dateOptions={dateOptions}
-                    timeOptions={timeOptions}
-                    currentDeadline={selectedTodo.deadline}
-                    onSave={saveDeadline}
-                  />
+                 <DeadlinePicker
+                   title="Update deadline"
+                   dateOptions={dateOptions}
+                   timeOptions={timeOptions}
+                   currentDeadline={selectedTodo.deadline}
+                   onSave={saveDeadline}
+                 />
                 </div>
               )}
             </div>
@@ -567,10 +721,10 @@ export default function App() {
                     <article key={item.id} className="task-card">
                       <div className="task-meta">
                         <span className="badge">Task</span>
-                        <span>{item.related_id ? `Related: ${getTaskNameById(item.related_id) || "Unknown"}` : "No relation"}</span>
+                        {item.related_id ? <span>{`Related: ${getTaskNameById(item.related_id) || "Unknown"}`}</span> : null}
                       </div>
                       <div>{item.text}</div>
-                      <p className="muted">{formatDeadline(item.deadline)}</p>
+                      {item.deadline ? <p className="muted">{formatDeadline(item.deadline)}</p> : null}
                     </article>
                   ))}
                 </div>
@@ -581,6 +735,8 @@ export default function App() {
           )}
         </section>
       </main>
+        </div>
+      </div>
 
       <SettingsPanel
         open={showSettings}
@@ -696,15 +852,67 @@ function DeadlinePicker({ title, dateOptions, timeOptions, currentDeadline, onSa
   );
 }
 
+function CollapsibleTask({ todo, relatedLabel, onOpen, onDelete, formatDeadline, onToggleComplete }) {
+  const [open, setOpen] = useState(false);
+  const hasRelated = !!todo.related_id;
+  const deadlineText = formatDeadline(todo.deadline);
+  const hasDeadline = !!todo.deadline && deadlineText !== "No deadline";
+  return (
+    <article className={`task-card ${open ? "open" : ""}`} onClick={() => setOpen(!open)}>
+      <div className="task-meta">
+        <span className="badge">Task</span>
+        {hasRelated && <span>{relatedLabel}</span>}
+      </div>
+      <div className="task-row">
+        <label className="task-check" onClick={(e) => e.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={!!todo.completed}
+            onChange={(e) => onToggleComplete(todo.id, e.target.checked)}
+          />
+          <span className={`task-title ${todo.completed ? "task-done" : ""}`}>{todo.text}</span>
+        </label>
+        {hasDeadline && <span className="muted">{deadlineText}</span>}
+      </div>
+      {open && (
+        <div className="actions">
+          <button className="button secondary" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Open</button>
+          <button className="ghost" onClick={(e) => { e.stopPropagation(); onDelete(); }}>Delete</button>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function CollapsibleList({ list, isSelected, onOpen, onRename, onDelete, onSummarise, summary }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <article className={`task-card ${isSelected ? "active-card" : ""} ${open ? "open" : ""}`} onClick={() => setOpen(!open)}>
+      <div className="task-meta">
+        <span className="badge">List</span>
+        {isSelected ? <span>Selected</span> : null}
+      </div>
+      <div className="task-row">
+        <div className="task-title">{list.name}</div>
+      </div>
+      {open && (
+        <>
+          <div className="actions">
+            <button className="button secondary" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Open</button>
+            <button className="ghost" onClick={(e) => { e.stopPropagation(); onRename(); }}>Rename</button>
+            <button className="ghost" onClick={(e) => { e.stopPropagation(); onDelete(); }}>Delete</button>
+            <button className="button secondary" onClick={(e) => { e.stopPropagation(); onSummarise(); }}>AI summary</button>
+          </div>
+          {summary && <p className="muted multiline">{summary}</p>}
+        </>
+      )}
+    </article>
+  );
+}
+
 function SettingsPanel({ open, onClose, theme, setTheme }) {
   if (!open) return null;
   const [openSelect, setOpenSelect] = useState(false);
-  const previews = {
-    default: { bg: "#f5f8ff", border: "#1f4bff" },
-    cozy: { bg: "#fff3e3", border: "#c47c4a" },
-    minimal: { bg: "#f7f7f8", border: "#1f2937" },
-    space: { bg: "#0f1429", border: "#6ac7ff" }
-  };
 
   const chooseTheme = (key) => {
     setTheme(key);
@@ -736,7 +944,7 @@ function SettingsPanel({ open, onClose, theme, setTheme }) {
                 >
                   <span
                     className="theme-chip"
-                    style={{ background: previews[key]?.bg, borderColor: previews[key]?.border }}
+                    style={{ background: themePreviews[key]?.bg, borderColor: themePreviews[key]?.border }}
                   />
                   <span>{info.label}</span>
                 </button>
