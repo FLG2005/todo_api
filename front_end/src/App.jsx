@@ -8,8 +8,59 @@ const themes = {
 };
 
 const views = ["front", "lists", "detail"];
+const viewLabels = {
+  front: "Main Menu",
+  lists: "My Lists",
+  detail: "Individual List"
+};
 
 const API_BASE = "http://localhost:8000";
+
+const dateFormatter = new Intl.DateTimeFormat(undefined, {
+  weekday: "short",
+  month: "short",
+  day: "numeric"
+});
+
+function generateDateOptions(days = 30) {
+  const today = new Date();
+  return Array.from({ length: days }, (_, idx) => {
+    const d = new Date(today);
+    d.setDate(today.getDate() + idx);
+    const value = d.toISOString().slice(0, 10);
+    return { value, label: dateFormatter.format(d) };
+  });
+}
+
+function generateTimeOptions() {
+  const options = [];
+  for (let h = 0; h < 24; h++) {
+    for (let m of [0, 15, 30, 45]) {
+      const hh = String(h).padStart(2, "0");
+      const mm = String(m).padStart(2, "0");
+      options.push({ value: `${hh}:${mm}`, label: `${hh}:${mm}` });
+    }
+  }
+  return options;
+}
+
+function splitDeadline(iso) {
+  if (!iso) return { date: "", time: "" };
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return { date: "", time: "" };
+  const date = d.toISOString().slice(0, 10);
+  const time = d.toISOString().slice(11, 16);
+  return { date, time };
+}
+
+function formatDeadline(iso) {
+  if (!iso) return "No deadline";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "No deadline";
+  const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${date} • ${time}`;
+}
 
 const api = {
   url: (path) => `${API_BASE}${path}`,
@@ -35,6 +86,8 @@ export default function App() {
   const [theme, setTheme] = useState("default");
   const [view, setView] = useState("front");
   const [settingsReady, setSettingsReady] = useState(false);
+  const [lists, setLists] = useState([]);
+  const [selectedListId, setSelectedListId] = useState(null);
   const [todos, setTodos] = useState([]);
   const [selected, setSelected] = useState(null);
   const [summary, setSummary] = useState("Click \"AI summary\" to plan your day.");
@@ -42,6 +95,8 @@ export default function App() {
   const [relatedTodos, setRelatedTodos] = useState([]);
   const [deletePrompt, setDeletePrompt] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [listPrompt, setListPrompt] = useState(null);
+  const [createDeadline, setCreateDeadline] = useState({ date: "", time: "" });
 
   useEffect(() => {
     const themeClass = themes[theme]?.className || themes.default.className;
@@ -49,23 +104,38 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
+    if (selected && selected.list_id && selected.list_id !== selectedListId) {
+      setSelected(null);
+    }
+  }, [selectedListId, selected]);
+
+  useEffect(() => {
     loadSettings();
-    loadTodos();
   }, []);
 
   useEffect(() => {
     if (!settingsReady) return;
-    saveSettings(theme, view);
-  }, [theme, view, settingsReady]);
+    saveSettings(theme, view, selectedListId);
+  }, [theme, view, selectedListId, settingsReady]);
 
   useEffect(() => {
-    loadTodos();
-  }, [view]);
+    if (selectedListId) {
+      loadTodos();
+    }
+  }, [view, selectedListId]);
 
   const selectedTodo = useMemo(
     () => todos.find((t) => t.id === selected?.id) || selected,
     [todos, selected]
   );
+
+  const currentList = useMemo(
+    () => lists.find((l) => l.id === selectedListId) || null,
+    [lists, selectedListId]
+  );
+
+  const dateOptions = useMemo(() => generateDateOptions(45), []);
+  const timeOptions = useMemo(() => generateTimeOptions(), []);
 
   const getTaskNameById = (id) => todos.find((t) => t.id === id)?.text || null;
 
@@ -74,19 +144,23 @@ export default function App() {
       const data = await api.json(api.url("/settings"));
       setTheme(data.theme || "default");
       setView(data.view || "front");
+      if (data.selected_list_id) {
+        setSelectedListId(data.selected_list_id);
+      }
     } catch (err) {
       console.error("Failed to load settings", err);
     } finally {
       setSettingsReady(true);
+      loadLists();
     }
   }
 
-  async function saveSettings(nextTheme, nextView) {
+  async function saveSettings(nextTheme, nextView, nextSelectedListId) {
     try {
       await api.json(api.url("/settings"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ theme: nextTheme, view: nextView })
+        body: JSON.stringify({ theme: nextTheme, view: nextView, selected_list_id: nextSelectedListId })
       });
     } catch (err) {
       console.error("Failed to save settings", err);
@@ -97,9 +171,30 @@ export default function App() {
     setView(nextView);
   };
 
-  async function loadTodos() {
+  async function loadLists() {
     try {
-      const data = await api.json(api.url("/todo_list"));
+      const data = await api.json(api.url("/lists"));
+      setLists(data);
+      if (data.length > 0) {
+        const exists = selectedListId && data.some((l) => l.id === selectedListId);
+        const desired = exists ? selectedListId : data[0].id;
+        setSelectedListId(desired);
+      } else {
+        setSelectedListId(null);
+      }
+    } catch (err) {
+      console.error("Failed to load lists", err);
+    }
+  }
+
+  async function loadTodos() {
+    if (!selectedListId) {
+      setTodos([]);
+      return;
+    }
+    try {
+      const params = new URLSearchParams({ list_id: selectedListId });
+      const data = await api.json(api.url(`/todo_list?${params.toString()}`));
       setTodos(data);
     } catch (err) {
       setTodos([]);
@@ -107,17 +202,74 @@ export default function App() {
     }
   }
 
+  async function createList(event) {
+    event.preventDefault();
+    const form = event.target;
+    const name = form.listName.value.trim();
+    if (!name) return;
+    try {
+      await api.json(api.url(`/lists?name=${encodeURIComponent(name)}`), { method: "POST" });
+      form.reset();
+      await loadLists();
+    } catch (err) {
+      alert(`Could not create list: ${err.message}`);
+    }
+  }
+
+  async function renameList(id, name) {
+    if (!name.trim()) return;
+    try {
+      await api.json(api.url(`/lists/${id}?name=${encodeURIComponent(name.trim())}`), { method: "PUT" });
+      await loadLists();
+      if (selectedListId === id) {
+        setSelectedListId(id);
+      }
+    } catch (err) {
+      alert(`Failed to rename list: ${err.message}`);
+    }
+  }
+
+  async function removeList(id) {
+    try {
+      await api.json(api.url(`/lists/${id}`), { method: "DELETE" });
+      if (selectedListId === id) {
+        const remaining = lists.filter((l) => l.id !== id);
+        const next = remaining[0]?.id || null;
+        setSelectedListId(next);
+      }
+      await loadLists();
+      await loadTodos();
+    } catch (err) {
+      alert(`Failed to delete list: ${err.message}`);
+    }
+  }
+
+  const selectList = (id) => {
+    setSelectedListId(id);
+    changeView("detail");
+  };
+
   async function handleCreate(e) {
     e.preventDefault();
+    if (!selectedListId) {
+      alert("Please select or create a list first.");
+      return;
+    }
     const form = e.target;
     const text = form.newText.value.trim();
     if (!text) return;
     const relatedIdValue = form.newRelatedSelect.value;
-    const params = new URLSearchParams({ todo_text: text });
+    let deadlineParam = null;
+    if (createDeadline.date && createDeadline.time) {
+      deadlineParam = `${createDeadline.date}T${createDeadline.time}:00`;
+    }
+    const params = new URLSearchParams({ todo_text: text, list_id: selectedListId });
     if (relatedIdValue) params.append("related_id", relatedIdValue);
+    if (deadlineParam) params.append("deadline", deadlineParam);
     try {
       await api.json(api.url(`/create_a_todo?${params.toString()}`), { method: "POST" });
       form.reset();
+      setCreateDeadline({ date: "", time: "" });
       await loadTodos();
     } catch (err) {
       alert(`Could not create todo: ${err.message}`);
@@ -140,6 +292,9 @@ export default function App() {
   async function selectTodo(id) {
     try {
       const todo = await api.json(api.url(`/fetch_a_todo/${id}`));
+      if (todo.list_id && todo.list_id !== selectedListId) {
+        setSelectedListId(todo.list_id);
+      }
       setSelected(todo);
       setRecommendations("Generate ideas related to the selected task.");
       setRelatedTodos([]);
@@ -175,6 +330,20 @@ export default function App() {
       await selectTodo(selectedTodo.id);
     } catch (err) {
       alert(`Unable to update relationship: ${err.message}`);
+    }
+  }
+
+  async function saveDeadline(deadlineValue) {
+    if (!selectedTodo) return;
+    const params = new URLSearchParams({ id: selectedTodo.id });
+    if (deadlineValue) params.append("deadline", deadlineValue);
+    else params.append("deadline", "");
+    try {
+      await api.json(api.url(`/edit_a_todo?${params.toString()}`), { method: "PUT" });
+      await loadTodos();
+      await selectTodo(selectedTodo.id);
+    } catch (err) {
+      alert(`Unable to update deadline: ${err.message}`);
     }
   }
 
@@ -224,7 +393,7 @@ export default function App() {
                 className={`nav-button ${view === v ? "active" : ""}`}
                 onClick={() => changeView(v)}
               >
-                {v === "front" ? "Main Menu" : v === "lists" ? "My Lists" : "Individual List"}
+                {v === "detail" && currentList ? `${currentList.name} tasks` : viewLabels[v]}
               </button>
             ))}
           </nav>
@@ -267,22 +436,34 @@ export default function App() {
         </section>
 
         <section className={view === "lists" ? "active" : ""} id="lists">
-          <div className="panel">
-            <h3>Task overview</h3>
-            <p>Browse all tasks. Use Individual List to create or edit tasks and relationships.</p>
+          <div className="split">
+            <div className="panel">
+              <h3>Create a list</h3>
+              <form onSubmit={createList}>
+                <input name="listName" type="text" placeholder="List name" required />
+                <button type="submit" className="button">Add list</button>
+              </form>
+            </div>
+            <div className="panel">
+              <h3>Manage lists</h3>
+              <p>Create, rename, or delete lists. Open a list to work on its tasks.</p>
+            </div>
           </div>
           <div className="list">
-            {todos.length === 0 && <div className="status">No todos yet. Create one to get started.</div>}
-            {todos.map((todo) => (
-              <article key={todo.id} className="task-card">
+            {lists.length === 0 && <div className="status">No lists yet. Create one to get started.</div>}
+            {lists.map((list) => (
+              <article key={list.id} className={`task-card ${selectedListId === list.id ? "active-card" : ""}`}>
                 <div className="task-meta">
-                  <span className="badge">Task</span>
-                  <span>{todo.related_id ? `Related: ${getTaskNameById(todo.related_id) || "Unknown"}` : "No relation"}</span>
+                  <span className="badge">List</span>
+                  <span>{selectedListId === list.id ? "Selected" : ""}</span>
                 </div>
-                <div>{todo.text}</div>
+                <div className="list-row">
+                  <strong>{list.name}</strong>
+                </div>
                 <div className="actions">
-                  <button className="button secondary" onClick={() => selectTodo(todo.id)}>Open</button>
-                  <button className="ghost" onClick={() => setDeletePrompt(todo)}>Delete</button>
+                  <button className="button secondary" onClick={() => selectList(list.id)}>Open</button>
+                  <button className="ghost" onClick={() => setListPrompt({ mode: "rename", list })}>Rename</button>
+                  <button className="ghost" onClick={() => setListPrompt({ mode: "delete", list })}>Delete</button>
                 </div>
               </article>
             ))}
@@ -290,30 +471,65 @@ export default function App() {
         </section>
 
         <section className={view === "detail" ? "active" : ""} id="detail">
-          <div className="panel">
-            <h3>Create a todo</h3>
-            <form id="createForm" onSubmit={handleCreate}>
-              <input name="newText" type="text" placeholder="Task text" required />
-              <select name="newRelatedSelect" defaultValue="">
-                <option value="">No related task</option>
-                {todos.map((todo) => (
-                  <option key={todo.id} value={todo.id}>
-                    {todo.text}
-                  </option>
-                ))}
-              </select>
-              <button type="submit" className="button">Add task</button>
-            </form>
-          </div>
+          {!selectedListId && <div className="status">Select or create a list first.</div>}
+          {selectedListId && (
+            <>
+              <div className="split">
+                <div className="panel">
+                  <h3>Create a todo</h3>
+                  <p className="muted">Working in: {currentList?.name || "List"}</p>
+                  <form id="createForm" onSubmit={handleCreate}>
+                    <input name="newText" type="text" placeholder="Task text" required />
+                    <select name="newRelatedSelect" defaultValue="">
+                      <option value="">No related task</option>
+                      {todos.map((todo) => (
+                        <option key={todo.id} value={todo.id}>
+                          {todo.text}
+                        </option>
+                      ))}
+                    </select>
+                    <DeadlineSelect
+                      dateOptions={dateOptions}
+                      timeOptions={timeOptions}
+                      value={createDeadline}
+                      onChange={setCreateDeadline}
+                      label="Deadline (optional)"
+                    />
+                    <button type="submit" className="button">Add task</button>
+                  </form>
+                </div>
+                <div className="panel">
+                  <h3>Tasks in this list</h3>
+                  <div className="list">
+                    {todos.length === 0 && <div className="status">No tasks yet in this list.</div>}
+                    {todos.map((todo) => (
+                      <article key={todo.id} className="task-card">
+                        <div className="task-meta">
+                          <span className="badge">Task</span>
+                          <span>{todo.related_id ? `Related: ${getTaskNameById(todo.related_id) || "Unknown"}` : "No relation"}</span>
+                        </div>
+                        <div>{todo.text}</div>
+                        <p className="muted">{formatDeadline(todo.deadline)}</p>
+                        <div className="actions">
+                          <button className="button secondary" onClick={() => selectTodo(todo.id)}>Open</button>
+                          <button className="ghost" onClick={() => setDeletePrompt(todo)}>Delete</button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              </div>
           <div className="split">
             <div>
               <h3>Selected todo</h3>
+              <p className="muted">Current list: {currentList?.name || "None"}</p>
               {!selectedTodo && <div className="status">Pick a task from "My Lists" to view details.</div>}
               {selectedTodo && (
                 <div className="panel-grid">
                   <div className="panel">
                     <h3>{selectedTodo.text}</h3>
                     <p>{selectedTodo.related_id ? `Related to ${getTaskNameById(selectedTodo.related_id) || "Unknown"}` : "Related: none"}</p>
+                    <p className="muted">{formatDeadline(selectedTodo.deadline)}</p>
                     <div className="actions">
                       <button className="button secondary" onClick={loadRecommendations}>Recommendations</button>
                       <button className="button secondary" onClick={loadRelated}>Fetch related</button>
@@ -327,6 +543,13 @@ export default function App() {
                     currentId={selectedTodo.related_id || ""}
                     onSave={saveRelated}
                     excludeId={selectedTodo.id}
+                  />
+                  <DeadlinePicker
+                    title="Update deadline"
+                    dateOptions={dateOptions}
+                    timeOptions={timeOptions}
+                    currentDeadline={selectedTodo.deadline}
+                    onSave={saveDeadline}
                   />
                 </div>
               )}
@@ -347,12 +570,15 @@ export default function App() {
                         <span>{item.related_id ? `Related: ${getTaskNameById(item.related_id) || "Unknown"}` : "No relation"}</span>
                       </div>
                       <div>{item.text}</div>
+                      <p className="muted">{formatDeadline(item.deadline)}</p>
                     </article>
                   ))}
                 </div>
               </div>
             </div>
           </div>
+            </>
+          )}
         </section>
       </main>
 
@@ -370,6 +596,19 @@ export default function App() {
           setDeletePrompt(null);
         }}
         onCancel={() => setDeletePrompt(null)}
+      />
+
+      <ListModal
+        prompt={listPrompt}
+        onCancel={() => setListPrompt(null)}
+        onRename={async (id, name) => {
+          await renameList(id, name);
+          setListPrompt(null);
+        }}
+        onDelete={async (id) => {
+          await removeList(id);
+          setListPrompt(null);
+        }}
       />
     </div>
   );
@@ -412,6 +651,47 @@ function RelatedPicker({ title, label, todos, currentId, onSave, excludeId }) {
           ))}
       </select>
       <button className="button" onClick={() => onSave(value)}>Save changes</button>
+    </div>
+  );
+}
+
+function DeadlineSelect({ value, onChange, dateOptions, timeOptions, label }) {
+  return (
+    <div className="deadline-select">
+      <label className="muted">{label}</label>
+      <div className="deadline-row">
+        <select value={value.date} onChange={(e) => onChange({ ...value, date: e.target.value })}>
+          <option value="">Date</option>
+          {dateOptions.map((d) => (
+            <option key={d.value} value={d.value}>{d.label}</option>
+          ))}
+        </select>
+        <select value={value.time} onChange={(e) => onChange({ ...value, time: e.target.value })}>
+          <option value="">Time</option>
+          {timeOptions.map((t) => (
+            <option key={t.value} value={t.value}>{t.label}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+function DeadlinePicker({ title, dateOptions, timeOptions, currentDeadline, onSave }) {
+  const initial = splitDeadline(currentDeadline);
+  const [value, setValue] = useState(initial);
+
+  useEffect(() => {
+    setValue(splitDeadline(currentDeadline));
+  }, [currentDeadline]);
+
+  const composed = value.date && value.time ? `${value.date}T${value.time}:00` : "";
+
+  return (
+    <div className="panel">
+      <h3>{title}</h3>
+      <DeadlineSelect value={value} onChange={setValue} dateOptions={dateOptions} timeOptions={timeOptions} label="Deadline (optional)" />
+      <button className="button" onClick={() => onSave(composed)}>Save changes</button>
     </div>
   );
 }
@@ -523,6 +803,45 @@ function DeleteModal({ todo, onConfirm, onCancel }) {
           <button className="button secondary" onClick={onCancel}>No</button>
           <button className="button" onClick={onConfirm}>Yes, delete</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ListModal({ prompt, onCancel, onRename, onDelete }) {
+  const [value, setValue] = useState(prompt?.list?.name || "");
+
+  useEffect(() => {
+    setValue(prompt?.list?.name || "");
+  }, [prompt]);
+
+  if (!prompt) return null;
+  const { mode, list } = prompt;
+  const isRename = mode === "rename";
+
+  return (
+    <div className="modal">
+      <div className="modal-backdrop" onClick={onCancel} aria-hidden="true"></div>
+      <div className="modal-content" role="dialog" aria-modal="true" aria-labelledby="list-modal-title">
+        <h3 id="list-modal-title">{isRename ? "Rename list" : "Delete list?"}</h3>
+        {isRename ? (
+          <>
+            <p className="muted">Update the name for “{list.name}”.</p>
+            <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="List name" />
+            <div className="modal-actions">
+              <button className="button secondary" onClick={onCancel}>Cancel</button>
+              <button className="button" onClick={() => onRename(list.id, value)}>Save</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p>Are you sure you want to delete “{list.name}” and its tasks?</p>
+            <div className="modal-actions">
+              <button className="button secondary" onClick={onCancel}>No</button>
+              <button className="button" onClick={() => onDelete(list.id)}>Yes, delete</button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

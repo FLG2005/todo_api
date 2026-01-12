@@ -2,7 +2,28 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from pydantic import BaseModel
-from database import connect, create_table, create_settings_table, list_todos, add_todo, delete_todo, update_todo_text, fetch_related_todos, fetch_a_todo, change_related_id, fetch_settings, update_settings
+from datetime import datetime
+from database import (
+    connect,
+    create_table,
+    create_settings_table,
+    list_todos,
+    list_todos_for_list,
+    add_todo,
+    delete_todo,
+    update_todo_text,
+    fetch_related_todos,
+    fetch_a_todo,
+    change_related_id,
+    fetch_settings,
+    update_settings,
+    list_lists,
+    add_list,
+    update_list_name,
+    delete_list,
+    fetch_list,
+    update_todo_deadline,
+)
 
 
 def get_db():
@@ -21,6 +42,7 @@ todo_list = []
 class Todo_item(BaseModel):
     text: str
     related_id: int
+    deadline: str | None = None
 
 
 class Todo_List(BaseModel):
@@ -29,6 +51,7 @@ class Todo_List(BaseModel):
 class SettingsPayload(BaseModel):
     theme: str
     view: str
+    selected_list_id: int | None = None
 
 
 id_counter = 1
@@ -47,6 +70,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def parse_deadline(deadline_str: str | None) -> str | None:
+    """Validate and normalize deadline input."""
+    if deadline_str is None or deadline_str == "":
+        return None
+    try:
+        # Accept ISO-like strings and store as ISO 8601
+        parsed = datetime.fromisoformat(deadline_str)
+        return parsed.isoformat()
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid deadline format. Use ISO format (YYYY-MM-DDTHH:MM[:SS])."
+        )
 
 
 @app.on_event("startup")
@@ -83,9 +121,17 @@ def reccomend_with_ai(todo):
 
 
 @app.get('/todo_list')
-def get_todo_list(db=Depends(get_db)):
+def get_todo_list(list_id: int | None = None, db=Depends(get_db)):
     try:
-        list_of_todos = list_todos(db)
+        if list_id is not None:
+            if fetch_list(db, list_id) is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"List with id {list_id} not found"
+                )
+            list_of_todos = list_todos_for_list(db, list_id)
+        else:
+            list_of_todos = list_todos(db)
         return list_of_todos
     except Exception as e:
         raise HTTPException(
@@ -106,11 +152,18 @@ def fetch_todo(id: int, db=Depends(get_db)):
 
 
 @app.post('/create_a_todo')
-def create_todo(todo_text: str, related_id: int = None, db=Depends(get_db)):
+def create_todo(todo_text: str, related_id: int = None, list_id: int = 1, deadline: str | None = None, db=Depends(get_db)):
     if not todo_text or not todo_text.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Todo text cannot be empty"
+        )
+
+    # Validate list exists
+    if fetch_list(db, list_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"List with id {list_id} not found"
         )
 
     # Validate related_id exists if provided
@@ -121,9 +174,15 @@ def create_todo(todo_text: str, related_id: int = None, db=Depends(get_db)):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Related todo with id {related_id} not found"
             )
+        if related_todo.get("list_id") != list_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Related todo must be in the same list"
+            )
 
+    clean_deadline = parse_deadline(deadline)
     try:
-        new_todo_id = add_todo(db, todo_text, related_id)
+        new_todo_id = add_todo(db, todo_text, related_id, list_id, clean_deadline)
         return {
             'success': f'created todo with id: {new_todo_id}',
             'id': new_todo_id
@@ -166,12 +225,18 @@ def delete_a_todo(id: int, db=Depends(get_db)):
 
 
 @app.put('/edit_a_todo')
-def edit_a_todo(id: int, text: str, db=Depends(get_db)):
-    if not text or not text.strip():
+def edit_a_todo(id: int, text: str | None = None, deadline: str | None = None, db=Depends(get_db)):
+    if text is None and deadline is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nothing to update"
+        )
+    if text is not None and not text.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Todo text cannot be empty"
         )
+    clean_deadline = parse_deadline(deadline)
 
     # Check if todo exists
     todo = fetch_a_todo(db, todo_id=id)
@@ -182,12 +247,20 @@ def edit_a_todo(id: int, text: str, db=Depends(get_db)):
         )
 
     try:
-        edit_success = update_todo_text(db, id, text)
-        if not edit_success:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update todo"
-            )
+        if text is not None:
+            edit_success = update_todo_text(db, id, text)
+            if not edit_success:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to update todo"
+                )
+        if deadline is not None:
+            deadline_success = update_todo_deadline(db, id, clean_deadline)
+            if not deadline_success:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to update deadline"
+                )
         return {
             "edited": True,
             "message": f"Todo with id {id} updated successfully"
@@ -240,6 +313,84 @@ def reccomend(id: int, db=Depends(get_db)):
         )
 
 
+@app.get('/lists')
+def get_lists(db=Depends(get_db)):
+    try:
+        return list_lists(db)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch lists: {str(e)}"
+        )
+
+
+@app.post('/lists')
+def create_list(name: str, db=Depends(get_db)):
+    if not name or not name.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="List name cannot be empty"
+        )
+    try:
+        new_id = add_list(db, name.strip())
+        return {"id": new_id, "name": name.strip()}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create list: {str(e)}"
+        )
+
+
+@app.put('/lists/{list_id}')
+def rename_list(list_id: int, name: str, db=Depends(get_db)):
+    if not name or not name.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="List name cannot be empty"
+        )
+    if fetch_list(db, list_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"List with id {list_id} not found"
+        )
+    try:
+        updated = update_list_name(db, list_id, name.strip())
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to rename list")
+        return {"id": list_id, "name": name.strip()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to rename list: {str(e)}"
+        )
+
+
+@app.delete('/lists/{list_id}')
+def remove_list(list_id: int, db=Depends(get_db)):
+    if fetch_list(db, list_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"List with id {list_id} not found"
+        )
+    try:
+        deleted = delete_list(db, list_id)
+        if not deleted:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete list")
+        current_settings = fetch_settings(db)
+        if current_settings.get("selected_list_id") == list_id:
+            update_settings(db, current_settings["theme"], current_settings["view"], 1)
+        return {"deleted": True, "id": list_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete list: {str(e)}"
+        )
+
+
 @app.get('/fetch_related_todos/{id}')
 def find_related_todos(id: int, db=Depends(get_db)):
     # Check if parent todo exists
@@ -251,7 +402,7 @@ def find_related_todos(id: int, db=Depends(get_db)):
         )
 
     try:
-        fetched_related = fetch_related_todos(db, related_id=id)
+        fetched_related = fetch_related_todos(db, related_id=id, list_id=parent_todo.get("list_id"))
         return {
             "related": fetched_related
         }
@@ -279,6 +430,11 @@ def alter_related(id: int, related_id: int = None, db=Depends(get_db)):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Related todo with id {related_id} not found"
+            )
+        if related_todo.get("list_id") != todo.get("list_id"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Related todo must be in the same list"
             )
 
     try:
@@ -327,9 +483,14 @@ def set_settings(payload: SettingsPayload, db=Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid view"
         )
+    if payload.selected_list_id is not None and fetch_list(db, payload.selected_list_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"List with id {payload.selected_list_id} not found"
+        )
     try:
-        update_settings(db, payload.theme, payload.view)
-        return {"theme": payload.theme, "view": payload.view}
+        update_settings(db, payload.theme, payload.view, payload.selected_list_id)
+        return {"theme": payload.theme, "view": payload.view, "selected_list_id": payload.selected_list_id}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
