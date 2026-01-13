@@ -86,6 +86,8 @@ const sortTodosByFlags = (items = []) =>
     return a.id - b.id;
   });
 
+const cleanAiText = (text) => (typeof text === "string" ? text.replace(/\*/g, "") : text || "");
+
 const api = {
   url: (path) => `${API_BASE}${path}`,
   json: async (path, options = {}) => {
@@ -128,6 +130,7 @@ export default function App() {
   const [closeSettingsTimeout, setCloseSettingsTimeout] = useState(null);
   const [settingsThemeOpen, setSettingsThemeOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [tasksCollapsed, setTasksCollapsed] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [closeHelpTimeout, setCloseHelpTimeout] = useState(null);
   const [navModalOpen, setNavModalOpen] = useState(false);
@@ -446,7 +449,7 @@ export default function App() {
     setSummary("Summarising...");
     try {
       const text = await api.text(api.url("/summarise_todos"), { method: "POST" });
-      setSummary(text);
+      setSummary(cleanAiText(text));
     } catch (err) {
       setSummary(`Unable to summarise: ${err.message}`);
     }
@@ -456,9 +459,10 @@ export default function App() {
     setListSummaries((prev) => ({ ...prev, [listId]: "Summarising..." }));
     try {
       const text = await api.text(api.url(`/summarise_todos?list_id=${listId}`), { method: "POST" });
-      setListSummaries((prev) => ({ ...prev, [listId]: text }));
+      const cleaned = cleanAiText(text);
+      setListSummaries((prev) => ({ ...prev, [listId]: cleaned }));
       if (listId === selectedListId) {
-        setSummary(text);
+        setSummary(cleaned);
       }
     } catch (err) {
       const msg = `Unable to summarise: ${err.message}`;
@@ -641,183 +645,192 @@ export default function App() {
           </div>
 
           <main>
-        <section className={view === "front" ? "active" : ""} id="front">
-          <div className="hero">
-            <div>
-              <h2>Pick a theme, keep momentum.</h2>
-              <p>The experience adapts across every page—front, lists, and individual items—so your flow and task outlines stay consistent.</p>
-              <div className="cta-buttons">
-                <button className="button" onClick={() => changeView("lists")}>Open my lists</button>
-              </div>
-              <div className="panel-grid">
-                <div className="panel">
-                  <h3>Consistent visuals</h3>
-                  <p>Once you choose a theme it persists everywhere until you switch.</p>
-                </div>
-                <div className="panel">
-                  <h3>Task outlines</h3>
-                  <p>Cards use theme-colored borders to keep your list readable at a glance.</p>
-                </div>
-              </div>
-            </div>
-            <ThemeScene theme={theme} />
-          </div>
-        </section>
-
-        <section className={view === "lists" ? "active" : ""} id="lists">
-          <div className="split">
-            <div className="panel">
-              <h3>Create a list</h3>
-              <form onSubmit={createList}>
-                <input name="listName" type="text" placeholder="List name" required />
-                <button type="submit" className="button">Add list</button>
-              </form>
-            </div>
-            <div className="panel">
-              <h3>Manage lists</h3>
-              <p>Create, rename, or delete lists. Open a list to work on its tasks.</p>
-            </div>
-          </div>
-          <div className="list">
-            {lists.length === 0 && <div className="status">No lists yet. Create one to get started.</div>}
-            {lists.map((list) => (
-              <CollapsibleList
-                key={list.id}
-                list={list}
-                isSelected={selectedListId === list.id}
-                onOpen={() => selectList(list.id)}
-                onRename={() => setListPrompt({ mode: "rename", list })}
-                onDelete={() => setListPrompt({ mode: "delete", list })}
-                onSummarise={() => summariseList(list.id)}
-                summary={listSummaries[list.id]}
-              />
-            ))}
-          </div>
-        </section>
-
-        <section className={view === "detail" ? "active" : ""} id="detail">
-          {!selectedListId && <div className="status">Select or create a list first.</div>}
-          {selectedListId && (
-            <>
-              <div className="split">
-                <div className="panel create-panel">
-                  <button
-                    className="collapse-header"
-                    onClick={() => setCreateOpen((o) => !o)}
-                    type="button"
-                  >
-                    <span>Create a task</span>
-                    <span className="collapse-icon">{createOpen ? "−" : "+"}</span>
-                  </button>
-                  {createOpen && (
-                    <>
-                      <p className="muted">Working in: {currentList?.name || "List"}</p>
-                      <form id="createForm" onSubmit={handleCreate}>
-                        <input name="newText" type="text" placeholder="Task text" required />
-                        <select name="newRelatedSelect" defaultValue="">
-                          <option value="">No related task</option>
-                          {todos.map((todo) => (
-                            <option key={todo.id} value={todo.id}>
-                              {todo.text}
-                            </option>
-                          ))}
-                        </select>
-                        <DeadlineSelect
-                          dateOptions={dateOptions}
-                          timeOptions={timeOptions}
-                          value={createDeadline}
-                          onChange={setCreateDeadline}
-                          label="Deadline (optional)"
-                        />
-                        <button type="submit" className="button">Add task</button>
-                      </form>
-                    </>
-                  )}
-                </div>
-              </div>
-          <div className="detail-body">
-            <aside className="tasks-sidebar">
-              <h3>Tasks in this list</h3>
-              <div className="list">
-                {todos.length === 0 && <div className="status">No tasks yet in this list.</div>}
-                {todos.map((todo) => (
-                <CollapsibleTask
-                  key={todo.id}
-                  todo={todo}
-                  relatedLabel={todo.related_id ? `Related: ${getTaskNameById(todo.related_id) || "Unknown"}` : ""}
-                  onOpen={() => selectTodo(todo.id)}
-                  onDelete={() => setDeletePrompt(todo)}
-                  formatDeadline={formatDeadline}
-                  onToggleComplete={toggleComplete}
-                  onFlagChange={updateFlags}
-                />
-              ))}
-            </div>
-          </aside>
-            <div>
-              <h3>Selected todo</h3>
-              <p className="muted">Current list: {currentList?.name || "None"}</p>
-              {!selectedTodo && <div className="status">Pick a task from "My Lists" to view details.</div>}
-              {selectedTodo && (
-                <div className="panel-grid">
-                  <div className="panel">
-                    <h3>{selectedTodo.text}</h3>
-                    {selectedTodo.related_id ? <p>{`Related to ${getTaskNameById(selectedTodo.related_id) || "Unknown"}`}</p> : null}
-                    <div className="selected-flags-row">
-                      <FlagStack count={selectedTodo.flags || 0} />
-                      {selectedTodo.deadline ? <p className="muted">{formatDeadline(selectedTodo.deadline)}</p> : null}
+            <section className={view === "front" ? "active" : ""} id="front">
+              <div className="hero">
+                <div>
+                  <h2>Pick a theme, keep momentum.</h2>
+                  <p>The experience adapts across every page—front, lists, and individual items—so your flow and task outlines stay consistent.</p>
+                  <div className="cta-buttons">
+                    <button className="button" onClick={() => changeView("lists")}>Open my lists</button>
+                  </div>
+                  <div className="panel-grid">
+                    <div className="panel">
+                      <h3>Consistent visuals</h3>
+                      <p>Once you choose a theme it persists everywhere until you switch.</p>
                     </div>
-                    <div className="actions">
-                      <button className="button secondary" onClick={loadRecommendations}>Recommendations</button>
-                      <button className="button secondary" onClick={loadRelated}>Fetch related</button>
+                    <div className="panel">
+                      <h3>Task outlines</h3>
+                      <p>Cards use theme-colored borders to keep your list readable at a glance.</p>
                     </div>
                   </div>
-                  <EditPanel title="Update text" label="New text" defaultValue={selectedTodo.text} onSave={saveText} />
-                  <RelatedPicker
-                    title="Update related task"
-                    label="Pick a related task (optional)"
-                    todos={todos}
-                    currentId={selectedTodo.related_id || ""}
-                    onSave={saveRelated}
-                    excludeId={selectedTodo.id}
+                </div>
+                <ThemeScene theme={theme} />
+              </div>
+            </section>
+
+            <section className={view === "lists" ? "active" : ""} id="lists">
+              <div className="split">
+                <div className="panel">
+                  <h3>Create a list</h3>
+                  <form onSubmit={createList}>
+                    <input name="listName" type="text" placeholder="List name" required />
+                    <button type="submit" className="button">Add list</button>
+                  </form>
+                </div>
+                <div className="panel">
+                  <h3>Manage lists</h3>
+                  <p>Create, rename, or delete lists. Open a list to work on its tasks.</p>
+                </div>
+              </div>
+              <div className="list">
+                {lists.length === 0 && <div className="status">No lists yet. Create one to get started.</div>}
+                {lists.map((list) => (
+                  <CollapsibleList
+                    key={list.id}
+                    list={list}
+                    isSelected={selectedListId === list.id}
+                    onOpen={() => selectList(list.id)}
+                    onRename={() => setListPrompt({ mode: "rename", list })}
+                    onDelete={() => setListPrompt({ mode: "delete", list })}
+                    onSummarise={() => summariseList(list.id)}
+                    summary={listSummaries[list.id]}
                   />
-                 <DeadlinePicker
-                   title="Update deadline"
-                   dateOptions={dateOptions}
-                   timeOptions={timeOptions}
-                   currentDeadline={selectedTodo.deadline}
-                   onSave={saveDeadline}
-                 />
-                </div>
-              )}
-            </div>
-            <div className="panel-grid">
-              <div className="panel">
-                <h3>Recommendations</h3>
-                <p className="multiline">{recommendations}</p>
+                ))}
               </div>
-              <div className="panel">
-                <h3>Related tasks</h3>
-                <div className="list">
-                  {relatedTodos.length === 0 && <div className="status">No related todos yet.</div>}
-                  {relatedTodos.map((item) => (
-                    <article key={item.id} className="task-card">
-                      <div className="task-meta">
-                        <span className="badge">Task</span>
-                        {item.related_id ? <span>{`Related: ${getTaskNameById(item.related_id) || "Unknown"}`}</span> : null}
+            </section>
+
+            <section className={view === "detail" ? "active" : ""} id="detail">
+              {!selectedListId && <div className="status">Select or create a list first.</div>}
+              {selectedListId && (
+                <>
+                  <div className="create-stack">
+                    <div className="panel create-panel">
+                      <button
+                        className="collapse-header"
+                        onClick={() => setCreateOpen((o) => !o)}
+                        type="button"
+                      >
+                        <span>Create a task</span>
+                        <span className="collapse-icon">{createOpen ? "−" : "+"}</span>
+                      </button>
+                      {createOpen && (
+                        <>
+                          <p className="muted">Working in: {currentList?.name || "List"}</p>
+                          <form id="createForm" onSubmit={handleCreate}>
+                            <input name="newText" type="text" placeholder="Task text" required />
+                            <select name="newRelatedSelect" defaultValue="">
+                              <option value="">No related task</option>
+                              {todos.map((todo) => (
+                                <option key={todo.id} value={todo.id}>
+                                  {todo.text}
+                                </option>
+                              ))}
+                            </select>
+                            <DeadlineSelect
+                              dateOptions={dateOptions}
+                              timeOptions={timeOptions}
+                              value={createDeadline}
+                              onChange={setCreateDeadline}
+                              label="Deadline (optional)"
+                            />
+                            <button type="submit" className="button">Add task</button>
+                          </form>
+                        </>
+                      )}
+                    </div>
+                    <div className="panel tasks-panel">
+                      <button
+                        className="collapse-header"
+                        type="button"
+                        onClick={() => setTasksCollapsed((o) => !o)}
+                      >
+                        <span>Tasks in this list</span>
+                        <span className="collapse-icon">{tasksCollapsed ? "+" : "−"}</span>
+                      </button>
+                      {!tasksCollapsed && (
+                        <div className="list tasks-list-content">
+                          {todos.length === 0 && <div className="status">No tasks yet in this list.</div>}
+                          {todos.map((todo) => (
+                            <CollapsibleTask
+                              key={todo.id}
+                              todo={todo}
+                              relatedLabel={todo.related_id ? `Related: ${getTaskNameById(todo.related_id) || "Unknown"}` : ""}
+                              onOpen={() => selectTodo(todo.id)}
+                              onDelete={() => setDeletePrompt(todo)}
+                              formatDeadline={formatDeadline}
+                              onToggleComplete={toggleComplete}
+                              onFlagChange={updateFlags}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="detail-body">
+                    <div>
+                      <h3>Selected todo</h3>
+                      <p className="muted">Current list: {currentList?.name || "None"}</p>
+                      {!selectedTodo && <div className="status">Pick a task from "My Lists" to view details.</div>}
+                      {selectedTodo && (
+                        <div className="panel-grid">
+                          <div className="panel">
+                            <h3>{selectedTodo.text}</h3>
+                            {selectedTodo.related_id ? <p>{`Related to ${getTaskNameById(selectedTodo.related_id) || "Unknown"}`}</p> : null}
+                            <div className="selected-flags-row">
+                              <FlagStack count={selectedTodo.flags || 0} />
+                              {selectedTodo.deadline ? <p className="muted">{formatDeadline(selectedTodo.deadline)}</p> : null}
+                            </div>
+                            <div className="actions">
+                              <button className="button secondary" onClick={loadRecommendations}>Recommendations</button>
+                              <button className="button secondary" onClick={loadRelated}>Fetch related</button>
+                            </div>
+                          </div>
+                          <EditPanel title="Update text" label="New text" defaultValue={selectedTodo.text} onSave={saveText} />
+                          <RelatedPicker
+                            title="Update related task"
+                            label="Pick a related task (optional)"
+                            todos={todos}
+                            currentId={selectedTodo.related_id || ""}
+                            onSave={saveRelated}
+                            excludeId={selectedTodo.id}
+                          />
+                          <DeadlinePicker
+                            title="Update deadline"
+                            dateOptions={dateOptions}
+                            timeOptions={timeOptions}
+                            currentDeadline={selectedTodo.deadline}
+                            onSave={saveDeadline}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div className="panel-grid">
+                      <div className="panel">
+                        <h3>Recommendations</h3>
+                        <p className="multiline">{recommendations}</p>
                       </div>
-                      <div>{item.text}</div>
-                      {item.deadline ? <p className="muted">{formatDeadline(item.deadline)}</p> : null}
-                    </article>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-            </>
-          )}
-        </section>
-      </main>
+                      <div className="panel">
+                        <h3>Related tasks</h3>
+                        <div className="list">
+                          {relatedTodos.length === 0 && <div className="status">No related todos yet.</div>}
+                          {relatedTodos.map((item) => (
+                            <article key={item.id} className="task-card">
+                              <div className="task-meta">
+                                <span className="badge">Task</span>
+                                {item.related_id ? <span>{`Related: ${getTaskNameById(item.related_id) || "Unknown"}`}</span> : null}
+                              </div>
+                              <div>{item.text}</div>
+                              {item.deadline ? <p className="muted">{formatDeadline(item.deadline)}</p> : null}
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </section>
+          </main>
         </div>
       </div>
 
@@ -1176,31 +1189,31 @@ function GetStartedModal({ open, onClose }) {
   return (
     <div className="modal">
       <div className="modal-backdrop" onClick={onClose} aria-hidden="true"></div>
-        <div
-          className="modal-content nav-modal-content"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="get-started-title"
+      <div
+        className="modal-content nav-modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="get-started-title"
         aria-describedby="get-started-desc"
-        >
-          <div className="nav-modal-header">
-            <h3 id="get-started-title">Get to know your way around!</h3>
-            <p id="get-started-desc" className="muted nav-modal-desc">Quick pointers will show you where to go next.</p>
-          </div>
-          <div className="nav-illustration" aria-hidden="true">
-            <MenuDropdownIllustration />
-          </div>
-          <div className="nav-dialog" role="presentation">
-            <p className="nav-dialog-copy">
-              Use the menu tab to navigate the app. The Home screen reflects your profile, the My Lists page keeps all your
-              lists stored safely, and the Current List tab lets you add, edit, or delete tasks from the list you’ve selected!
-            </p>
-          </div>
-          <div className="modal-actions">
-            <button className="button" onClick={onClose}>Okay, got it!</button>
-          </div>
+      >
+        <div className="nav-modal-header">
+          <h3 id="get-started-title">Get to know your way around!</h3>
+          <p id="get-started-desc" className="muted nav-modal-desc">Quick pointers will show you where to go next.</p>
+        </div>
+        <div className="nav-illustration" aria-hidden="true">
+          <MenuDropdownIllustration />
+        </div>
+        <div className="nav-dialog" role="presentation">
+          <p className="nav-dialog-copy">
+            Use the menu tab to navigate the app. The Home screen reflects your profile, the My Lists page keeps all your
+            lists stored safely, and the Current List tab lets you add, edit, or delete tasks from the list you’ve selected!
+          </p>
+        </div>
+        <div className="modal-actions">
+          <button className="button" onClick={onClose}>Okay, got it!</button>
         </div>
       </div>
+    </div>
   );
 }
 

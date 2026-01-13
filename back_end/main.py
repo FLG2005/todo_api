@@ -1,5 +1,8 @@
+import os
+from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from openai import OpenAI
 from pydantic import BaseModel
 from datetime import datetime
@@ -75,6 +78,41 @@ app.add_middleware(
 )
 
 
+def load_env_if_present():
+    """Load environment variables from a local .env file without overriding existing values."""
+    env_path = Path(__file__).parent / ".env"
+    if not env_path.exists():
+        return
+
+    for line in env_path.read_text().splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+load_env_if_present()
+
+
+def get_openai_client() -> OpenAI:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="OpenAI API key missing. Set OPENAI_API_KEY or add it to back_end/.env",
+        )
+    try:
+        return OpenAI(api_key=api_key)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initialise OpenAI client: {exc}",
+        )
+
+
 def parse_deadline(deadline_str: str | None) -> str | None:
     """Validate and normalize deadline input."""
     if deadline_str is None or deadline_str == "":
@@ -102,25 +140,60 @@ def init_db():
 
 def summarise_with_ai(todo_list):
     print(todo_list)
-    client = OpenAI()
+    client = get_openai_client()
 
     response = client.responses.create(
         model="gpt-4.1",
-        input=f'please use my todo list: {todo_list} to plan my day in a friendly and concise manner, do not bother opening up your answer by saying absolutely or so on, just get straight to answering provide a haiku in closing'
+    input=(
+        "please use my todo list: "
+        f"{todo_list} to plan my day in a friendly and concise manner, "
+        "do not bother opening up your answer by saying absolutely or so on, "
+        "just get straight to answering provide a haiku in closing"
+    )
     )
 
     return response.output_text
 
 
 def reccomend_with_ai(todo):
-    client = OpenAI()
+    """Generate related todos using OpenAI and return a simple list of dicts."""
+    client = get_openai_client()
 
-    response = client.responses.parse(
-        model="gpt-4.1",
-        input=f'please use my todo: {todo} to create similar or related tasks that would aid me in completeing other tasks in life without imparing my ability to do said task. give 5 tasks in bullet point form with no other text. do not bother opening up your answer by saying absolutely or so on, the related id is the id of the task which was given.',
-        text_format=Todo_List
+    prompt = (
+        "You are helping expand a todo item into adjacent, helpful follow-up tasks. "
+        "Return 5 concise task suggestions as bullet lines. "
+        "Do NOT add extra wording before or after the bullets. "
+        "Example format:\n"
+        "- Pack sunscreen\n"
+        "- Check tire pressure\n"
+        "- Confirm campsite booking\n"
+        "- Prep quick snacks\n"
+        "- Lay out hiking clothes\n\n"
+        f"Original todo: {todo}"
     )
-    return response.output_parsed
+
+    try:
+        response = client.responses.create(model="gpt-4.1", input=prompt)
+        raw_text = response.output_text
+    except Exception as exc:  # pragma: no cover - safety net for upstream errors
+        print(f"OpenAI recommendation error: {exc}")
+        raw_text = ""
+
+    def parse_recommendations(text: str) -> list[dict]:
+        if not text:
+            return []
+        lines = [ln.strip(" \n\r\t-*•") for ln in text.splitlines() if ln.strip()]
+        cleaned = [ln for ln in lines if ln]
+        return [{"text": item, "related_id": todo.get("id")} for item in cleaned][:5]
+
+    parsed = parse_recommendations(raw_text)
+    if not parsed:
+        parsed = [
+            {"text": f"Break {todo.get('text', 'this task')} into smaller steps", "related_id": todo.get("id")},
+            {"text": "Prepare any materials or info needed", "related_id": todo.get("id")},
+            {"text": "Set a time to start and a time to finish", "related_id": todo.get("id")},
+        ]
+    return {"todos": parsed}
 
 
 @app.get('/todo_list')
@@ -321,7 +394,7 @@ def summarise(list_id: int | None = None, db=Depends(get_db)):
                 detail="No todos found to summarize"
             )
         summary = summarise_with_ai(list_of_todos)
-        return summary
+        return PlainTextResponse(content=summary)
     except HTTPException:
         raise
     except Exception as e:
