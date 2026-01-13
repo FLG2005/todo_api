@@ -468,8 +468,20 @@ section.active {
 }
 
 .collapse-icon {
+  color: inherit;
+}
+
+.collapse-icon {
   font-size: 22px;
   line-height: 1;
+}
+
+/* Boost contrast for the dark/cyber theme */
+body.theme-space .collapse-header,
+body.theme-space .collapse-icon,
+body.theme-cyber .collapse-header,
+body.theme-cyber .collapse-icon {
+  color: #e6edff;
 }
 
 .create-panel .muted,
@@ -1266,6 +1278,49 @@ textarea { min-height: 82px; resize: vertical; }
   flex-direction: column;
   align-items: center;
   gap: 4px;
+}
+
+.nav-illustration {
+  display: grid;
+  place-items: center;
+  margin: 4px 0 0;
+}
+
+.nav-illustration-svg {
+  width: 260px;
+  max-width: 100%;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.nav-illustration-label {
+  text-align: center;
+  margin: 0;
+  font-size: 13px;
+}
+
+.nav-dialog {
+  background: color-mix(in srgb, var(--panel) 90%, var(--accent-soft) 10%);
+  border: 1px solid var(--accent-soft);
+  border-radius: 14px;
+  padding: 12px 14px;
+  text-align: left;
+  box-shadow: 0 12px 28px var(--shadow);
+}
+
+.nav-dialog-title {
+  font-weight: 800;
+  margin-bottom: 6px;
+  color: var(--text);
+}
+
+.nav-dialog-copy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.4;
 }
 
 .nav-modal-content .modal-actions {

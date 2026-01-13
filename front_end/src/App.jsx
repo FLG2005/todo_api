@@ -1176,22 +1176,31 @@ function GetStartedModal({ open, onClose }) {
   return (
     <div className="modal">
       <div className="modal-backdrop" onClick={onClose} aria-hidden="true"></div>
-      <div
-        className="modal-content nav-modal-content"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="get-started-title"
+        <div
+          className="modal-content nav-modal-content"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="get-started-title"
         aria-describedby="get-started-desc"
-      >
-        <div className="nav-modal-header">
-          <h3 id="get-started-title">Get to know your way around!</h3>
-          <p id="get-started-desc" className="muted nav-modal-desc">Quick pointers will show you where to go next.</p>
-        </div>
-        <div className="modal-actions">
-          <button className="button" onClick={onClose}>Close</button>
+        >
+          <div className="nav-modal-header">
+            <h3 id="get-started-title">Get to know your way around!</h3>
+            <p id="get-started-desc" className="muted nav-modal-desc">Quick pointers will show you where to go next.</p>
+          </div>
+          <div className="nav-illustration" aria-hidden="true">
+            <MenuDropdownIllustration />
+          </div>
+          <div className="nav-dialog" role="presentation">
+            <p className="nav-dialog-copy">
+              Use the menu tab to navigate the app. The Home screen reflects your profile, the My Lists page keeps all your
+              lists stored safely, and the Current List tab lets you add, edit, or delete tasks from the list you’ve selected!
+            </p>
+          </div>
+          <div className="modal-actions">
+            <button className="button" onClick={onClose}>Okay, got it!</button>
+          </div>
         </div>
       </div>
-    </div>
   );
 }
 
@@ -1275,5 +1284,60 @@ function FlagControl({ value, onChange }) {
         </div>
       )}
     </div>
+  );
+}
+
+function MenuDropdownIllustration() {
+  return (
+    <svg
+      className="nav-illustration-svg"
+      viewBox="0 0 320 340"
+      role="img"
+      aria-label="Static preview of the menu dropdown"
+    >
+      <defs>
+        <linearGradient id="menuBg" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor="#e5d5c1" />
+          <stop offset="100%" stopColor="#c6b19a" />
+        </linearGradient>
+        <filter id="menuShadow" x="-12%" y="-12%" width="124%" height="124%">
+          <feDropShadow dx="0" dy="12" stdDeviation="14" floodColor="rgba(0,0,0,0.22)" />
+        </filter>
+        <filter id="cardShadow" x="-10%" y="-10%" width="120%" height="120%">
+          <feDropShadow dx="0" dy="10" stdDeviation="10" floodColor="rgba(0,0,0,0.14)" />
+        </filter>
+      </defs>
+      <rect x="0" y="0" width="320" height="340" fill="url(#menuBg)" rx="22" />
+      <g transform="translate(72, 22)" filter="url(#menuShadow)">
+        <rect x="92" y="0" width="102" height="56" rx="18" fill="#f6e9dd" stroke="#b47b46" strokeWidth="2.5" />
+        <text x="143" y="32" textAnchor="middle" fontSize="18" fontWeight="800" fill="#4d3824">Menu</text>
+      </g>
+      <g transform="translate(44, 94)" filter="url(#cardShadow)">
+        <rect x="0" y="0" width="232" height="232" rx="24" fill="#fdfaf6" stroke="#e2cbb3" strokeWidth="2.5" />
+        <rect x="14" y="16" width="204" height="56" rx="14" fill="#e8ccaa" stroke="#b47b46" strokeWidth="2.5" />
+        <rect x="14" y="86" width="204" height="56" rx="14" fill="#f9f1e8" stroke="#e2cbb3" strokeWidth="2.5" />
+        <rect x="14" y="156" width="204" height="56" rx="14" fill="#f9f1e8" stroke="#e2cbb3" strokeWidth="2.5" />
+        <text x="116" y="52" textAnchor="middle" fontSize="19" fontWeight="800" fill="#2d1f15">Home</text>
+        <path
+          d="M194 32 L204 40 L204 56 H186 V40 Z"
+          fill="none"
+          stroke="#2d1f15"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <text x="116" y="122" textAnchor="middle" fontSize="19" fontWeight="800" fill="#2d1f15">My Lists</text>
+        <path
+          d="M188 108 h18 M188 116 h18 M188 124 h18"
+          stroke="#2d1f15"
+          strokeWidth="3"
+          strokeLinecap="round"
+        />
+        <text x="116" y="192" textAnchor="middle" fontSize="19" fontWeight="800" fill="#2d1f15">Current list</text>
+        <rect x="186" y="176" width="20" height="20" rx="6" fill="none" stroke="#2d1f15" strokeWidth="2.5" />
+        <path d="M192 184 h8" stroke="#2d1f15" strokeWidth="2.5" strokeLinecap="round" />
+        <path d="M192 190 h12" stroke="#2d1f15" strokeWidth="2.5" strokeLinecap="round" />
+      </g>
+    </svg>
   );
 }
