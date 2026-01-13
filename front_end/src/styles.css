@@ -210,14 +210,17 @@ body::before {
 }
 
 .menu-dropdown .nav-button,
-.settings-dropdown .nav-button {
+.settings-dropdown .nav-button,
+.help-dropdown .nav-button {
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
 }
 
 .menu-dropdown .nav-button:hover,
 .menu-dropdown .nav-button:focus-visible,
 .settings-dropdown .nav-button:hover,
-.settings-dropdown .nav-button:focus-visible {
+.settings-dropdown .nav-button:focus-visible,
+.help-dropdown .nav-button:hover,
+.help-dropdown .nav-button:focus-visible {
   background: color-mix(in srgb, var(--accent-soft) 40%, var(--panel) 60%);
   border-color: var(--accent);
   transform: translateY(-1px);
