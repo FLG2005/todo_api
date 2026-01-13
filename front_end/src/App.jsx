@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileUser as FileUserIcon, House as HomeIcon, List as ListIcon, Settings as SettingsIcon } from "lucide-react";
+import {
+  BadgeInfo as HelpIcon,
+  FileUser as FileUserIcon,
+  House as HomeIcon,
+  List as ListIcon,
+  Navigation as NavigationIcon,
+  ShieldQuestionMark as QueryIcon,
+  Settings as SettingsIcon
+} from "lucide-react";
 
 const themes = {
   default: { className: "theme-default", label: "Default" },
@@ -120,13 +128,18 @@ export default function App() {
   const [closeSettingsTimeout, setCloseSettingsTimeout] = useState(null);
   const [settingsThemeOpen, setSettingsThemeOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [closeHelpTimeout, setCloseHelpTimeout] = useState(null);
+  const [navModalOpen, setNavModalOpen] = useState(false);
+  const [getStartedOpen, setGetStartedOpen] = useState(false);
 
   useEffect(() => {
     return () => {
       if (closeMenuTimeout) clearTimeout(closeMenuTimeout);
       if (closeSettingsTimeout) clearTimeout(closeSettingsTimeout);
+      if (closeHelpTimeout) clearTimeout(closeHelpTimeout);
     };
-  }, [closeMenuTimeout, closeSettingsTimeout]);
+  }, [closeMenuTimeout, closeSettingsTimeout, closeHelpTimeout]);
 
   useEffect(() => {
     const themeClass = themes[theme]?.className || themes.default.className;
@@ -464,6 +477,50 @@ export default function App() {
 
   return (
     <div className="app">
+      <div
+        className="help-launcher-stack"
+        onMouseEnter={() => {
+          if (closeHelpTimeout) clearTimeout(closeHelpTimeout);
+          setHelpOpen(true);
+        }}
+        onMouseLeave={() => {
+          const timeout = setTimeout(() => setHelpOpen(false), 120);
+          setCloseHelpTimeout(timeout);
+        }}
+      >
+        <button
+          className="settings-launcher"
+          onClick={() => setHelpOpen((o) => !o)}
+          aria-label="Open help"
+          title="Help"
+        >
+          <HelpIcon className="gear-icon" aria-hidden="true" />
+        </button>
+        {helpOpen && (
+          <div className="help-dropdown">
+            <div className="dropdown-section">
+              <div className="dropdown-label">Need a hand?</div>
+            </div>
+            <button
+              className="nav-button full"
+              onClick={() => {
+                setHelpOpen(false);
+                setNavModalOpen(true);
+              }}
+            >
+              Navigation <NavigationIcon className="menu-icon" aria-hidden="true" />
+            </button>
+            <button
+              className="nav-button full"
+              onClick={() => {
+                setHelpOpen(false);
+              }}
+            >
+              Queries <QueryIcon className="menu-icon" aria-hidden="true" />
+            </button>
+          </div>
+        )}
+      </div>
       <div className="layout">
         <div className="content-area">
           <div className="launcher-stack">
@@ -513,7 +570,7 @@ export default function App() {
                       setMenuOpen(true);
                     }}
                   >
-                    Individual list <FileUserIcon className="menu-icon" aria-hidden="true" />
+                    Current list <FileUserIcon className="menu-icon" aria-hidden="true" />
                   </button>
                 </div>
               )}
@@ -792,6 +849,15 @@ export default function App() {
           setListPrompt(null);
         }}
       />
+      <NavigationModal
+        open={navModalOpen}
+        onClose={() => setNavModalOpen(false)}
+        onGetStarted={() => {
+          setNavModalOpen(false);
+          setGetStartedOpen(true);
+        }}
+      />
+      <GetStartedModal open={getStartedOpen} onClose={() => setGetStartedOpen(false)} />
     </div>
   );
 }
@@ -1075,6 +1141,55 @@ function ListModal({ prompt, onCancel, onRename, onDelete }) {
             </div>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function NavigationModal({ open, onClose, onGetStarted }) {
+  if (!open) return null;
+  return (
+    <div className="modal">
+      <div className="modal-backdrop" onClick={onClose} aria-hidden="true"></div>
+      <div
+        className="modal-content nav-modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="nav-modal-title"
+        aria-describedby="nav-modal-desc"
+      >
+        <div className="nav-modal-header">
+          <h3 id="nav-modal-title">Navigation Menu</h3>
+          <p id="nav-modal-desc" className="muted nav-modal-desc">Never take a wrong turn again!</p>
+        </div>
+        <div className="modal-actions">
+          <button className="button secondary" onClick={onClose}>Close</button>
+          <button className="button" onClick={onGetStarted}>Get Started</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GetStartedModal({ open, onClose }) {
+  if (!open) return null;
+  return (
+    <div className="modal">
+      <div className="modal-backdrop" onClick={onClose} aria-hidden="true"></div>
+      <div
+        className="modal-content nav-modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="get-started-title"
+        aria-describedby="get-started-desc"
+      >
+        <div className="nav-modal-header">
+          <h3 id="get-started-title">Get to know your way around!</h3>
+          <p id="get-started-desc" className="muted nav-modal-desc">Quick pointers will show you where to go next.</p>
+        </div>
+        <div className="modal-actions">
+          <button className="button" onClick={onClose}>Close</button>
+        </div>
       </div>
     </div>
   );

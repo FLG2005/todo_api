@@ -157,6 +157,15 @@ body::before {
   z-index: 25;
 }
 
+.help-launcher-stack {
+  position: fixed;
+  top: 18px;
+  left: 18px;
+  display: inline-flex;
+  align-items: center;
+  z-index: 25;
+}
+
 .launcher-item {
   position: relative;
   display: inline-flex;
@@ -179,10 +188,39 @@ body::before {
   min-width: 180px;
 }
 
+.help-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  background: var(--panel);
+  border: 1px solid var(--accent-soft);
+  border-radius: 18px;
+  box-shadow: 0 16px 34px var(--shadow);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  z-index: 24;
+  min-width: 180px;
+}
+
 .nav-button.full {
   width: 100%;
   display: block;
   text-align: center;
+}
+
+.menu-dropdown .nav-button,
+.settings-dropdown .nav-button {
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+
+.menu-dropdown .nav-button:hover,
+.menu-dropdown .nav-button:focus-visible,
+.settings-dropdown .nav-button:hover,
+.settings-dropdown .nav-button:focus-visible {
+  background: color-mix(in srgb, var(--accent-soft) 40%, var(--panel) 60%);
+  border-color: var(--accent);
+  transform: translateY(-1px);
 }
 
 .dropdown-section {
@@ -195,6 +233,10 @@ body::before {
   font-size: 13px;
   color: var(--muted);
   padding: 0 2px;
+}
+
+.help-dropdown .dropdown-label {
+  font-size: 12px;
 }
 
 .dropdown-theme-grid {
@@ -211,9 +253,15 @@ body::before {
   border: 1px solid var(--accent-soft);
   background: color-mix(in srgb, var(--panel) 94%, var(--accent-soft) 6%);
   cursor: pointer;
-  transition: border-color 0.2s ease, transform 0.12s ease;
+  transition: border-color 0.2s ease, transform 0.12s ease, background 0.15s ease;
   text-align: left;
   color: var(--text);
+}
+
+.dropdown-theme-option:hover,
+.dropdown-theme-option:focus-visible {
+  background: color-mix(in srgb, var(--accent-soft) 24%, var(--panel) 76%);
+  border-color: var(--accent);
 }
 
 .dropdown-theme-option.active {
@@ -613,6 +661,12 @@ textarea { min-height: 82px; resize: vertical; }
   border-radius: 10px;
   color: var(--text);
   cursor: pointer;
+}
+
+.flag-option:hover,
+.flag-option:focus-visible {
+  background: color-mix(in srgb, var(--accent-soft) 30%, var(--panel) 70%);
+  border-color: var(--accent-soft);
 }
 
 .flag-option.active {
@@ -1156,12 +1210,18 @@ textarea { min-height: 82px; resize: vertical; }
   display: flex;
   align-items: center;
   gap: 10px;
-  transition: border-color 0.2s ease, transform 0.15s ease;
+  transition: border-color 0.2s ease, transform 0.15s ease, background 0.15s ease;
 }
 
 .theme-option.active {
   border-color: var(--accent);
   transform: translateY(-1px);
+}
+
+.theme-option:hover,
+.theme-option:focus-visible {
+  background: color-mix(in srgb, var(--accent-soft) 24%, var(--panel) 76%);
+  border-color: var(--accent);
 }
 
 .theme-chip {
@@ -1192,6 +1252,26 @@ textarea { min-height: 82px; resize: vertical; }
   display: grid;
   gap: 12px;
   z-index: 1;
+}
+
+.nav-modal-content {
+  text-align: center;
+}
+
+.nav-modal-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.nav-modal-content .modal-actions {
+  justify-content: center;
+}
+
+.nav-modal-desc {
+  margin-top: 0;
+  margin-bottom: 12px;
 }
 
 .modal-actions {
