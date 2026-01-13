@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { FileUser as FileUserIcon, House as HomeIcon, List as ListIcon, Settings as SettingsIcon } from "lucide-react";
 
 const themes = {
   default: { className: "theme-default", label: "Default" },
@@ -68,6 +69,14 @@ function formatDeadline(iso) {
   const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
   return `${date} • ${time}`;
 }
+
+const sortTodosByFlags = (items = []) =>
+  [...items].sort((a, b) => {
+    const flagsA = a.flags ?? 0;
+    const flagsB = b.flags ?? 0;
+    if (flagsA !== flagsB) return flagsB - flagsA;
+    return a.id - b.id;
+  });
 
 const api = {
   url: (path) => `${API_BASE}${path}`,
@@ -217,7 +226,7 @@ export default function App() {
     try {
       const params = new URLSearchParams({ list_id: selectedListId });
       const data = await api.json(api.url(`/todo_list?${params.toString()}`));
-      setTodos(data);
+      setTodos(sortTodosByFlags(data));
       updateSummaryText(selectedListId);
     } catch (err) {
       setTodos([]);
@@ -323,6 +332,19 @@ export default function App() {
       }
     } catch (err) {
       console.error("Unable to update task", err);
+    }
+  }
+
+  async function updateFlags(id, flags) {
+    try {
+      const params = new URLSearchParams({ id, flags });
+      await api.json(api.url(`/edit_a_todo?${params.toString()}`), { method: "PUT" });
+      await loadTodos();
+      if (selectedTodo?.id === id) {
+        await selectTodo(id);
+      }
+    } catch (err) {
+      alert(`Unable to update flags: ${err.message}`);
     }
   }
 
@@ -473,7 +495,7 @@ export default function App() {
                       setMenuOpen(true);
                     }}
                   >
-                    Home
+                    Home <HomeIcon className="menu-icon" aria-hidden="true" />
                   </button>
                   <button
                     className={`nav-button full ${view === "lists" ? "active" : ""}`}
@@ -482,7 +504,7 @@ export default function App() {
                       setMenuOpen(true);
                     }}
                   >
-                    My Lists
+                    My Lists <ListIcon className="menu-icon" aria-hidden="true" />
                   </button>
                   <button
                     className={`nav-button full ${view === "detail" ? "active" : ""}`}
@@ -491,7 +513,7 @@ export default function App() {
                       setMenuOpen(true);
                     }}
                   >
-                    Individual list
+                    Individual list <FileUserIcon className="menu-icon" aria-hidden="true" />
                   </button>
                 </div>
               )}
@@ -515,7 +537,7 @@ export default function App() {
                 aria-label="Open settings"
                 title="Settings"
               >
-                <GearIcon />
+                <SettingsIcon className="gear-icon" aria-hidden="true" />
               </button>
               {settingsHoverOpen && (
                 <div className="settings-dropdown">
@@ -670,6 +692,7 @@ export default function App() {
                   onDelete={() => setDeletePrompt(todo)}
                   formatDeadline={formatDeadline}
                   onToggleComplete={toggleComplete}
+                  onFlagChange={updateFlags}
                 />
               ))}
             </div>
@@ -683,7 +706,10 @@ export default function App() {
                   <div className="panel">
                     <h3>{selectedTodo.text}</h3>
                     {selectedTodo.related_id ? <p>{`Related to ${getTaskNameById(selectedTodo.related_id) || "Unknown"}`}</p> : null}
-                    {selectedTodo.deadline ? <p className="muted">{formatDeadline(selectedTodo.deadline)}</p> : null}
+                    <div className="selected-flags-row">
+                      <FlagStack count={selectedTodo.flags || 0} />
+                      {selectedTodo.deadline ? <p className="muted">{formatDeadline(selectedTodo.deadline)}</p> : null}
+                    </div>
                     <div className="actions">
                       <button className="button secondary" onClick={loadRecommendations}>Recommendations</button>
                       <button className="button secondary" onClick={loadRelated}>Fetch related</button>
@@ -852,16 +878,20 @@ function DeadlinePicker({ title, dateOptions, timeOptions, currentDeadline, onSa
   );
 }
 
-function CollapsibleTask({ todo, relatedLabel, onOpen, onDelete, formatDeadline, onToggleComplete }) {
+function CollapsibleTask({ todo, relatedLabel, onOpen, onDelete, formatDeadline, onToggleComplete, onFlagChange }) {
   const [open, setOpen] = useState(false);
   const hasRelated = !!todo.related_id;
   const deadlineText = formatDeadline(todo.deadline);
   const hasDeadline = !!todo.deadline && deadlineText !== "No deadline";
+  const flags = todo.flags || 0;
   return (
     <article className={`task-card ${open ? "open" : ""}`} onClick={() => setOpen(!open)}>
-      <div className="task-meta">
-        <span className="badge">Task</span>
-        {hasRelated && <span>{relatedLabel}</span>}
+      <div className="task-top">
+        <div className="task-meta">
+          <span className="badge">Task</span>
+          {hasRelated && <span>{relatedLabel}</span>}
+        </div>
+        {flags > 0 ? <FlagStack count={flags} /> : null}
       </div>
       <div className="task-row">
         <label className="task-check" onClick={(e) => e.stopPropagation()}>
@@ -876,6 +906,10 @@ function CollapsibleTask({ todo, relatedLabel, onOpen, onDelete, formatDeadline,
       </div>
       {open && (
         <div className="actions">
+          <FlagControl
+            value={flags}
+            onChange={(next) => onFlagChange(todo.id, next)}
+          />
           <button className="button secondary" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Open</button>
           <button className="ghost" onClick={(e) => { e.stopPropagation(); onDelete(); }}>Delete</button>
         </div>
@@ -893,10 +927,10 @@ function CollapsibleList({ list, isSelected, onOpen, onRename, onDelete, onSumma
       className={`task-card list-card ${isSelected ? "active-card" : ""} ${open ? "open" : ""}`}
       onClick={() => setOpen(!open)}
     >
+      <div className="list-count-banner">{taskLabel}</div>
       <div className="task-meta">
         <span className="badge">List</span>
-        <span className="list-count">{taskLabel}</span>
-        {isSelected ? <span>Selected</span> : null}
+        {isSelected ? <span className="badge selected-badge">Selected</span> : null}
       </div>
       <div className="task-row">
         <div className="task-title">{list.name}</div>
@@ -990,21 +1024,6 @@ function ThemeScene({ theme }) {
   );
 }
 
-function GearIcon() {
-  return (
-    <svg className="gear-icon" viewBox="0 0 24 24" role="img" aria-hidden="true">
-      <path
-        d="M12 8.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4Zm8.2 3.9-1.08-.43a7.2 7.2 0 0 0 0-1.54l1.08-.43a.5.5 0 0 0 .28-.61l-.9-2.46a.5.5 0 0 0-.63-.28l-1.11.44a7.3 7.3 0 0 0-1.36-.98l-.17-1.12a.5.5 0 0 0-.49-.42h-2.9a.5.5 0 0 0-.49.42l-.17 1.12a7.3 7.3 0 0 0-1.36.98l-1.11-.44a.5.5 0 0 0-.63.28l-.9 2.46a.5.5 0 0 0 .28.61l1.08.43c-.05.26-.07.52-.07.77 0 .25.02.51.07.77l-1.08.43a.5.5 0 0 0-.28.61l.9 2.46c.1.25.38.38.63.28l1.11-.44c.42.39.88.72 1.36.98l.17 1.12c.04.24.24.42.49.42h2.9c.25 0 .45-.18.49-.42l.17-1.12c.48-.26.94-.59 1.36-.98l1.11.44c.25.1.53-.03.63-.28l.9-2.46a.5.5 0 0 0-.28-.61Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 function DeleteModal({ todo, onConfirm, onCancel }) {
   if (!todo) return null;
   return (
@@ -1057,6 +1076,89 @@ function ListModal({ prompt, onCancel, onRename, onDelete }) {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function FlagIcon({ filled }) {
+  return (
+    <svg className={`flag-icon ${filled ? "filled" : ""}`} viewBox="0 0 24 24" role="img" aria-hidden="true">
+      <path
+        d="M6 4v16m0-13.5c1.2-.5 2.8-1.2 4-1.2 2 0 3.3 1.4 4.8 1.4 1 0 2.2-.4 3.2-.9v8c-1 .5-2.2.9-3.2.9-1.5 0-2.8-1.4-4.8-1.4-1.2 0-2.8.7-4 1.2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function FlagStack({ count, max = 3, showEmpty = false }) {
+  const total = showEmpty ? max : count;
+  if (total <= 0) {
+    return <div className="flag-stack" aria-label="0 flags" />;
+  }
+  return (
+    <div className="flag-stack" aria-label={`${count} flag${count === 1 ? "" : "s"}`}>
+      {Array.from({ length: total }).map((_, idx) => (
+        <FlagIcon key={idx} filled={idx < count} />
+      ))}
+    </div>
+  );
+}
+
+function FlagControl({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const safeValue = Number.isFinite(value) ? value : 0;
+  const options = [0, 1, 2, 3];
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (event) => {
+      if (ref.current && !ref.current.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div
+      className="flag-control"
+      ref={ref}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button
+        className="flag-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <FlagStack count={safeValue} showEmpty />
+      </button>
+      {open && (
+        <div className="flag-menu" role="listbox">
+          {options.map((count) => (
+            <button
+              key={count}
+              className={`flag-option ${count === safeValue ? "active" : ""}`}
+              role="option"
+              aria-selected={count === safeValue}
+              onClick={() => {
+                onChange(count);
+                setOpen(false);
+              }}
+            >
+              <FlagStack count={count} showEmpty />
+              <span className="flag-label">{count === 1 ? "1 flag" : `${count} flags`}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

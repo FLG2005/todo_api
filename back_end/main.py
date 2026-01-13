@@ -24,6 +24,7 @@ from database import (
     fetch_list,
     update_todo_deadline,
     update_todo_completed,
+    update_todo_flags,
 )
 
 
@@ -44,6 +45,7 @@ class Todo_item(BaseModel):
     text: str
     related_id: int
     deadline: str | None = None
+    flags: int = 0
 
 
 class Todo_List(BaseModel):
@@ -226,8 +228,15 @@ def delete_a_todo(id: int, db=Depends(get_db)):
 
 
 @app.put('/edit_a_todo')
-def edit_a_todo(id: int, text: str | None = None, deadline: str | None = None, completed: bool | None = None, db=Depends(get_db)):
-    if text is None and deadline is None and completed is None:
+def edit_a_todo(
+    id: int,
+    text: str | None = None,
+    deadline: str | None = None,
+    completed: bool | None = None,
+    flags: int | None = None,
+    db=Depends(get_db)
+):
+    if text is None and deadline is None and completed is None and flags is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Nothing to update"
@@ -236,6 +245,11 @@ def edit_a_todo(id: int, text: str | None = None, deadline: str | None = None, c
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Todo text cannot be empty"
+        )
+    if flags is not None and (flags < 0 or flags > 3):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Flags must be between 0 and 3"
         )
     clean_deadline = parse_deadline(deadline)
 
@@ -268,6 +282,13 @@ def edit_a_todo(id: int, text: str | None = None, deadline: str | None = None, c
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to update completion"
+                )
+        if flags is not None:
+            flags_success = update_todo_flags(db, id, flags)
+            if not flags_success:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to update flags"
                 )
         return {
             "edited": True,

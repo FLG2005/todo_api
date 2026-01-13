@@ -262,6 +262,13 @@ body::before {
   height: 22px;
 }
 
+.menu-icon {
+  width: 18px;
+  height: 18px;
+  vertical-align: middle;
+  margin-left: 8px;
+}
+
 /* brand styles removed in favor of sidebar layout */
 
 .theme-switcher {
@@ -473,10 +480,22 @@ textarea { min-height: 82px; resize: vertical; }
 }
 
 .task-card.list-card {
-  padding: 10px 12px;
-  border-width: 1px;
-  box-shadow: inset 0 0 0 2px var(--outline-primary), 0 8px 18px var(--shadow);
-  background: color-mix(in srgb, var(--panel) 94%, var(--outline-primary) 6%);
+  padding: 12px 14px;
+  border-width: 2px;
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 3px var(--outline-primary), 0 10px 24px var(--shadow);
+  background: color-mix(in srgb, var(--panel) 88%, var(--outline-primary) 12%);
+  gap: 6px;
+}
+
+.list-count-banner {
+  display: block;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--muted);
+  margin: 4px auto 6px;
 }
 
 .task-card:hover { transform: translateY(-2px); }
@@ -493,8 +512,23 @@ textarea { min-height: 82px; resize: vertical; }
   gap: 10px;
 }
 
+.task-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.task-card.list-card .task-row {
+  gap: 10px;
+}
+
 .task-card .task-title {
   font-weight: 700;
+}
+
+.task-card.list-card .task-title {
+  font-size: 16px;
 }
 
 .task-card .actions {
@@ -520,6 +554,83 @@ textarea { min-height: 82px; resize: vertical; }
   opacity: 0.6;
 }
 
+.flag-control {
+  position: relative;
+}
+
+.flag-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--accent-soft);
+  background: color-mix(in srgb, var(--panel) 90%, var(--outline-primary) 10%);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.flag-stack {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.flag-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+}
+
+.flag-icon.filled {
+  color: #d64045;
+}
+
+.flag-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: color-mix(in srgb, var(--panel) 94%, var(--accent-soft) 6%);
+  border: 1px solid var(--accent-soft);
+  border-radius: 12px;
+  box-shadow: 0 12px 28px var(--shadow);
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+  z-index: 10;
+  min-width: 140px;
+}
+
+.flag-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 6px 8px;
+  border-radius: 10px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.flag-option.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel) 90%);
+}
+
+.flag-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.selected-flags-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .task-meta {
   display: flex;
   justify-content: space-between;
@@ -532,6 +643,12 @@ textarea { min-height: 82px; resize: vertical; }
 
 .list-count {
   font-weight: 700;
+  color: var(--text);
+}
+
+.selected-badge {
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel) 82%);
+  border: 1px solid var(--accent);
   color: var(--text);
 }
 
