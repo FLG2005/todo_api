@@ -19,14 +19,18 @@ const themes = {
   default: { className: "theme-default", label: "Default" },
   cozy: { className: "theme-cozy", label: "Cozy" },
   minimal: { className: "theme-minimal", label: "Minimalist" },
-  space: { className: "theme-space", label: "Space" }
+  space: { className: "theme-space", label: "Space" },
+  royalGarden: { className: "theme-royal-garden", label: "Royal Garden" },
+  beachDay: { className: "theme-beach-day", label: "Beach Day" }
 };
 
 const themePreviews = {
   default: { bg: "#f5f8ff", border: "#1f4bff" },
   cozy: { bg: "#fff3e3", border: "#c47c4a" },
   minimal: { bg: "#f7f7f8", border: "#1f2937" },
-  space: { bg: "#0f1429", border: "#6ac7ff" }
+  space: { bg: "#0f1429", border: "#6ac7ff" },
+  royalGarden: { bg: "#0f2017", border: "#d4af37" },
+  beachDay: { bg: "#cfe8ff", border: "#f5d8a5" }
 };
 
 const views = ["front", "lists", "detail"];
@@ -144,19 +148,31 @@ export default function App() {
   const [queriesModalOpen, setQueriesModalOpen] = useState(false);
   const [queriesFaqOpen, setQueriesFaqOpen] = useState(false);
   const [queriesSupportOpen, setQueriesSupportOpen] = useState(false);
+  const [coinsOpen, setCoinsOpen] = useState(false);
+  const [checkCoins, setCheckCoins] = useState(0);
+  const [coinsInfoOpen, setCoinsInfoOpen] = useState(false);
+  const [checkStoreOpen, setCheckStoreOpen] = useState(false);
+  const [closeCoinsTimeout, setCloseCoinsTimeout] = useState(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState("login");
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
   const [user, setUser] = useState(null);
+  const refreshedUserRef = useRef(false);
 
   useEffect(() => {
     return () => {
       if (closeMenuTimeout) clearTimeout(closeMenuTimeout);
       if (closeSettingsTimeout) clearTimeout(closeSettingsTimeout);
       if (closeHelpTimeout) clearTimeout(closeHelpTimeout);
+      if (closeCoinsTimeout) clearTimeout(closeCoinsTimeout);
     };
-  }, [closeMenuTimeout, closeSettingsTimeout, closeHelpTimeout]);
+  }, [closeMenuTimeout, closeSettingsTimeout, closeHelpTimeout, closeCoinsTimeout]);
+
+  useEffect(() => {
+    if (!user) return;
+    setCheckCoins(user.check_coins || 0);
+  }, [user]);
 
   useEffect(() => {
     try {
@@ -175,6 +191,27 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const refreshUser = async () => {
+      if (!user?.username || !user?.password || refreshedUserRef.current) return;
+      try {
+        const data = await api.json(api.url(`/auth/login`), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: user.username, password: user.password })
+        });
+        const withSecret = { ...data, password: user.password };
+        setUser(withSecret);
+        setCheckCoins(withSecret.check_coins || 0);
+        localStorage.setItem("authUser", JSON.stringify(withSecret));
+        refreshedUserRef.current = true;
+      } catch (err) {
+        console.warn("Could not refresh user session", err);
+      }
+    };
+    refreshUser();
+  }, [user]);
+
+  useEffect(() => {
     const modalOpen =
       showSettings ||
       deletePrompt ||
@@ -184,6 +221,8 @@ export default function App() {
       queriesModalOpen ||
       queriesFaqOpen ||
       queriesSupportOpen ||
+      checkStoreOpen ||
+      coinsInfoOpen ||
       authModalOpen ||
       !user;
 
@@ -206,6 +245,8 @@ export default function App() {
     queriesModalOpen,
     queriesFaqOpen,
     queriesSupportOpen,
+    checkStoreOpen,
+    coinsInfoOpen,
     authModalOpen,
     user
   ]);
@@ -596,8 +637,10 @@ export default function App() {
       });
       const withSecret = { ...data, password };
       setUser(withSecret);
+      setCheckCoins(withSecret.check_coins || 0);
       localStorage.setItem("authUser", JSON.stringify(withSecret));
       setAuthModalOpen(false);
+      return withSecret;
     } catch (err) {
       let friendly = "Unable to authenticate";
       if (err?.message) {
@@ -627,6 +670,9 @@ export default function App() {
           onSubmit={(username, password) => handleAuth(authMode, username, password)}
           loading={authLoading}
           error={authError}
+          onUser={(u) => {
+            setCheckCoins(u?.check_coins || 0);
+          }}
         />
       </div>
     );
@@ -637,6 +683,7 @@ export default function App() {
       <div
         className="help-launcher-stack"
         onMouseEnter={() => {
+          if (coinsOpen) setCoinsOpen(false);
           if (closeHelpTimeout) clearTimeout(closeHelpTimeout);
           setHelpOpen(true);
         }}
@@ -654,7 +701,17 @@ export default function App() {
           <HelpIcon className="gear-icon" aria-hidden="true" />
         </button>
         {helpOpen && (
-          <div className="help-dropdown">
+          <div
+            className="help-dropdown"
+            onMouseEnter={() => {
+              if (closeHelpTimeout) clearTimeout(closeHelpTimeout);
+              setHelpOpen(true);
+            }}
+            onMouseLeave={() => {
+              const timeout = setTimeout(() => setHelpOpen(false), 120);
+              setCloseHelpTimeout(timeout);
+            }}
+          >
             <div className="dropdown-section">
               <div className="dropdown-label">Need a hand?</div>
             </div>
@@ -678,12 +735,56 @@ export default function App() {
             </button>
           </div>
         )}
-        <div className="coins-card" aria-label="Check coins">
-          <Coins className="coins-icon" aria-hidden="true" />
-          <div className="coins-meta">
-            <span className="coins-label">Check coins</span>
-            <span className="coins-value">0</span>
+        <div
+          className="coins-wrapper"
+          onMouseEnter={() => {
+            setHelpOpen(false);
+            if (closeCoinsTimeout) clearTimeout(closeCoinsTimeout);
+            setCoinsOpen(true);
+          }}
+          onMouseLeave={() => {
+            const timeout = setTimeout(() => setCoinsOpen(false), 120);
+            setCloseCoinsTimeout(timeout);
+          }}
+        >
+          <div
+            className="coins-card"
+            aria-label="Check coins"
+            onClick={() => {
+              setHelpOpen(false);
+              setCoinsOpen((o) => !o);
+            }}
+          >
+            <Coins className="coins-icon" aria-hidden="true" />
+            <div className="coins-meta">
+              <span className="coins-label">Check coins</span>
+              <span className="coins-value">{checkCoins}</span>
+            </div>
           </div>
+          {coinsOpen && (
+            <div
+              className="coins-dropdown"
+              onMouseEnter={() => {
+                if (closeCoinsTimeout) clearTimeout(closeCoinsTimeout);
+                setCoinsOpen(true);
+              }}
+              onMouseLeave={() => {
+                const timeout = setTimeout(() => setCoinsOpen(false), 120);
+                setCloseCoinsTimeout(timeout);
+              }}
+            >
+              <button
+                className="nav-button full"
+                type="button"
+                onClick={() => {
+                  setCoinsOpen(false);
+                  setCoinsInfoOpen(true);
+                }}
+              >
+                How to get Check Coins?
+              </button>
+            </div>
+          )}
         </div>
       </div>
       <div className="layout">
@@ -1057,6 +1158,16 @@ export default function App() {
       />
       <QueriesFaqModal open={queriesFaqOpen} onClose={() => setQueriesFaqOpen(false)} />
       <QueriesSupportModal open={queriesSupportOpen} onClose={() => setQueriesSupportOpen(false)} />
+      <CoinsInfoModal
+        open={coinsInfoOpen}
+        onClose={() => setCoinsInfoOpen(false)}
+        onOpenStore={() => {
+          setCoinsInfoOpen(false);
+          setCheckStoreOpen(true);
+        }}
+        loginStreak={user?.login_streak || 0}
+      />
+      <CheckStoreModal open={checkStoreOpen} onClose={() => setCheckStoreOpen(false)} />
       <AuthModal
         open={authModalOpen || !user}
         mode={authMode}
@@ -2203,10 +2314,148 @@ function UpdatePasswordModal({ open, onClose, user, setUser, onHidePassword }) {
     </div>
   );
 }
-function AuthModal({ open, mode, onModeChange, onSubmit, loading, error }) {
+function CoinsInfoModal({ open, onClose, onOpenStore, loginStreak = 0 }) {
+  if (!open) return null;
+  return (
+    <div className="modal">
+      <div className="modal-backdrop" onClick={onClose} aria-hidden="true"></div>
+      <div
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="coins-info-title"
+        style={{ width: "min(520px, 94vw)", padding: "26px" }}
+      >
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          style={{
+            position: "absolute",
+            top: "12px",
+            right: "12px",
+            background: "none",
+            border: "none",
+            fontSize: "18px",
+            cursor: "pointer",
+            color: "var(--muted)",
+            padding: "8px",
+            lineHeight: 1
+          }}
+        >
+          ✕
+        </button>
+        <h3 id="coins-info-title" style={{ textAlign: "center", marginBottom: "8px", fontSize: "22px" }}>
+          How to get Check Coins?
+        </h3>
+        <p
+          className="muted"
+          style={{
+            textAlign: "center",
+            margin: "0 0 18px",
+            padding: "10px 14px",
+            borderRadius: "10px",
+            background: "linear-gradient(135deg, rgba(31,75,255,0.08), rgba(87,204,255,0.08))",
+            color: "var(--text)"
+          }}
+        >
+          Track your streak and see exactly how coins add up.
+        </p>
+        <div
+          className="panel"
+          style={{
+            padding: "16px",
+            marginBottom: "12px",
+            background: "linear-gradient(135deg, rgba(31,75,255,0.12), rgba(87,204,255,0.12))",
+            border: "1px solid var(--accent-soft)",
+            boxShadow: "0 16px 38px rgba(31, 75, 255, 0.16)"
+          }}
+        >
+          <div className="coins-info-heading" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px", color: "var(--text)" }}>
+            <span>Current login streak</span>
+            <Flame size={18} color="var(--accent)" />
+          </div>
+          <div className="coins-info-value" style={{ fontSize: "18px", fontWeight: 700, display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--text)" }}>
+            <span>{loginStreak} day{loginStreak === 1 ? "" : "s"}</span>
+            <span style={{ fontWeight: 700, color: "var(--accent)", background: "rgba(255,255,255,0.6)", padding: "6px 10px", borderRadius: "12px", boxShadow: "0 6px 14px rgba(0,0,0,0.08)" }}>
+              {loginStreak * 10}+ coins earned
+            </span>
+          </div>
+        </div>
+        <div className="panel" style={{ marginTop: "8px", background: "var(--panel)", padding: "14px 16px", lineHeight: 1.6, border: "1px solid var(--accent-soft)", boxShadow: "0 12px 30px rgba(15, 23, 42, 0.12)" }}>
+          <div style={{ fontWeight: 700, marginBottom: "6px", color: "var(--text)" }}>Earning rules</div>
+          <ul className="coins-info-list" style={{ margin: 0, paddingLeft: "18px" }}>
+            <li><strong>+10 coins</strong> each time your daily login streak increases.</li>
+            <li><strong>+20 bonus coins</strong> when you reach a 5-day streak milestone.</li>
+            <li><strong>+50 bonus coins</strong> when you hit a 10-day streak milestone.</li>
+            <li>Stay active daily to keep the streak growing and earn more.</li>
+          </ul>
+        </div>
+        <div className="modal-actions" style={{ marginTop: "18px", justifyContent: "center" }}>
+          <button
+            className="button"
+            type="button"
+            style={{ minWidth: "150px" }}
+            onClick={onOpenStore}
+          >
+            Shop
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+function CheckStoreModal({ open, onClose }) {
+  if (!open) return null;
+  return (
+    <div className="modal">
+      <div className="modal-backdrop" onClick={onClose} aria-hidden="true"></div>
+      <div
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="check-store-title"
+        style={{ width: "min(520px, 94vw)", padding: "26px" }}
+      >
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          style={{
+            position: "absolute",
+            top: "12px",
+            right: "12px",
+            background: "none",
+            border: "none",
+            fontSize: "18px",
+            cursor: "pointer",
+            color: "var(--muted)",
+            padding: "8px",
+            lineHeight: 1
+          }}
+        >
+          ✕
+        </button>
+        <h3 id="check-store-title" style={{ textAlign: "center", marginBottom: "8px", fontSize: "22px" }}>
+          Check Store
+        </h3>
+        <p className="muted" style={{ textAlign: "center", margin: "0 0 18px" }}>
+          Spend your check coins on boosts and rewards (coming soon).
+        </p>
+        <div className="panel" style={{ padding: "14px 16px", background: "var(--panel)", lineHeight: 1.6, border: "1px solid var(--accent-soft)" }}>
+          <ul style={{ margin: 0, paddingLeft: "18px" }}>
+            <li>Daily streak boosters and themed lists.</li>
+            <li>Custom icons and backgrounds for your tasks.</li>
+            <li>Priority tips to level up your productivity.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+function AuthModal({ open, mode, onModeChange, onSubmit, loading, error, onUser }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [pendingUser, setPendingUser] = useState(null);
 
   useEffect(() => {
     setUsername("");
@@ -2217,7 +2466,12 @@ function AuthModal({ open, mode, onModeChange, onSubmit, loading, error }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSubmit(username, password);
+    const maybePromise = onSubmit(username, password);
+    if (maybePromise && typeof maybePromise.then === "function") {
+      maybePromise.then((userData) => {
+        if (userData && onUser) onUser(userData);
+      });
+    }
   };
 
   return (

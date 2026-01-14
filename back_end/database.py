@@ -95,7 +95,8 @@ def create_users_table(conn: sqlite3.Connection) -> None:
             username TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
             login_streak INTEGER NOT NULL DEFAULT 0,
-            last_login TEXT
+            last_login TEXT,
+            check_coins INTEGER NOT NULL DEFAULT 0
         );
         """
     )
@@ -106,6 +107,8 @@ def create_users_table(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN login_streak INTEGER NOT NULL DEFAULT 0;")
     if "last_login" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN last_login TEXT;")
+    if "check_coins" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN check_coins INTEGER NOT NULL DEFAULT 0;")
     conn.commit()
 
 
@@ -115,7 +118,7 @@ def ensure_default_user(conn: sqlite3.Connection) -> None:
     row = cursor.fetchone()
     if row is None:
         conn.execute(
-            "INSERT INTO users (id, username, password_hash, login_streak) VALUES (1, 'default', '', 0);"
+            "INSERT INTO users (id, username, password_hash, login_streak, check_coins) VALUES (1, 'default', '', 0, 0);"
         )
     conn.commit()
 
@@ -427,8 +430,8 @@ def add_user(conn: sqlite3.Connection, username: str, password_hash: str) -> int
     """Create a new user and return id."""
     today = datetime.utcnow().date().isoformat()
     cursor = conn.execute(
-        "INSERT INTO users (username, password_hash, login_streak, last_login) VALUES (?, ?, ?, ?);",
-        (username, password_hash, 1, today)
+        "INSERT INTO users (username, password_hash, login_streak, last_login, check_coins) VALUES (?, ?, ?, ?, ?);",
+        (username, password_hash, 1, today, 10)
     )
     conn.commit()
     return cursor.lastrowid
@@ -437,7 +440,7 @@ def add_user(conn: sqlite3.Connection, username: str, password_hash: str) -> int
 def fetch_user_by_username(conn: sqlite3.Connection, username: str) -> dict | None:
     """Fetch user record by username."""
     cursor = conn.execute(
-        "SELECT id, username, password_hash, login_streak, last_login FROM users WHERE username = ?;",
+        "SELECT id, username, password_hash, login_streak, last_login, check_coins FROM users WHERE username = ?;",
         (username,)
     )
     row = cursor.fetchone()
@@ -447,18 +450,18 @@ def fetch_user_by_username(conn: sqlite3.Connection, username: str) -> dict | No
 def fetch_user_by_id(conn: sqlite3.Connection, user_id: int) -> dict | None:
     """Fetch user record by id."""
     cursor = conn.execute(
-        "SELECT id, username, password_hash, login_streak, last_login FROM users WHERE id = ?;",
+        "SELECT id, username, password_hash, login_streak, last_login, check_coins FROM users WHERE id = ?;",
         (user_id,)
     )
     row = cursor.fetchone()
     return dict(row) if row else None
 
 
-def update_user_login_meta(conn: sqlite3.Connection, user_id: int, login_streak: int, last_login: str) -> bool:
+def update_user_login_meta(conn: sqlite3.Connection, user_id: int, login_streak: int, last_login: str, check_coins: int) -> bool:
     """Update login streak metadata for a user."""
     cursor = conn.execute(
-        "UPDATE users SET login_streak = ?, last_login = ? WHERE id = ?;",
-        (login_streak, last_login, user_id)
+        "UPDATE users SET login_streak = ?, last_login = ?, check_coins = ? WHERE id = ?;",
+        (login_streak, last_login, check_coins, user_id)
     )
     conn.commit()
     return cursor.rowcount > 0
