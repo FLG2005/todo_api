@@ -210,7 +210,7 @@ def signup(payload: AuthPayload, db=Depends(get_db)):
     try:
         user_id = add_user(db, username, hash_password(password))
         ensure_user_default_list(db, user_id)
-        return {"id": user_id, "username": username, "login_streak": 1}
+        return {"id": user_id, "username": username, "login_streak": 1, "check_coins": 10}
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -230,11 +230,25 @@ def login(payload: AuthPayload, db=Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid login credentials. Try entering them again."
         )
-    # Update login streak
+    # Update login streak and check coins
     today = datetime.utcnow().date()
     existing_streak = user.get("login_streak") or 0
+    existing_coins = user.get("check_coins") or 0
     last_login_str = user.get("last_login")
     new_streak = 1
+    coins_earned = 0
+    streak_increment = 0
+    # Backfill coins if streak already reflects more days than coins awarded (e.g., manual edits)
+    def minimum_coins_for_streak(streak: int) -> int:
+        base = max(streak, 0) * 10
+        if streak >= 5:
+            base += 20
+        if streak >= 10:
+            base += 50
+        return base
+    expected_coins_for_existing_streak = minimum_coins_for_streak(existing_streak)
+    if existing_coins < expected_coins_for_existing_streak:
+        coins_earned += expected_coins_for_existing_streak - existing_coins
     if last_login_str:
         try:
             last_login_date = datetime.fromisoformat(last_login_str).date()
@@ -249,8 +263,17 @@ def login(payload: AuthPayload, db=Depends(get_db)):
             else:
                 # Missed at least one full day: reset the streak to 1 for today.
                 new_streak = 1
-    update_user_login_meta(db, user["id"], new_streak, today.isoformat())
-    return {"id": user["id"], "username": user["username"], "login_streak": new_streak}
+    # award coins for streak increment
+    streak_increment = max(new_streak - existing_streak, 0)
+    if streak_increment:
+        coins_earned += streak_increment * 10
+        if new_streak >= 5 and existing_streak < 5:
+            coins_earned += 20
+        if new_streak >= 10 and existing_streak < 10:
+            coins_earned += 50
+    new_total_coins = existing_coins + coins_earned
+    update_user_login_meta(db, user["id"], new_streak, today.isoformat(), new_total_coins)
+    return {"id": user["id"], "username": user["username"], "login_streak": new_streak, "check_coins": new_total_coins}
 
 
 @app.post("/auth/update_username")

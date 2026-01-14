@@ -186,6 +186,20 @@ body::before {
   align-items: center;
 }
 
+/* Sand outlines for Beach Day nav/coins buttons */
+body.theme-beach-day .settings-launcher,
+body.theme-beach-day .settings-launcher-rect,
+body.theme-beach-day .launcher-stack .settings-launcher,
+body.theme-beach-day .help-launcher-stack .settings-launcher,
+body.theme-beach-day .help-launcher-stack .settings-launcher-rect,
+body.theme-beach-day .coins-card {
+  border-color: #f5d8a5;
+  box-shadow:
+    0 10px 20px rgba(12, 27, 51, 0.18),
+    0 0 0 2px rgba(245, 216, 163, 0.7),
+    0 0 20px rgba(245, 216, 163, 0.35);
+}
+
 .menu-dropdown,
 .settings-dropdown {
   position: absolute;
@@ -231,6 +245,19 @@ body::before {
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
 }
 
+/* Royal Garden: golden menu links */
+body.theme-royal-garden .menu-dropdown .nav-button,
+body.theme-royal-garden .settings-dropdown .nav-button,
+body.theme-royal-garden .help-dropdown .nav-button {
+  color: #f2cb5b;
+  border-color: rgba(242, 203, 91, 0.4);
+}
+
+.coins-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
 .coins-card {
   display: inline-flex;
   align-items: center;
@@ -240,6 +267,8 @@ body::before {
   background: color-mix(in srgb, var(--panel) 90%, var(--accent-soft) 10%);
   border-radius: 12px;
   box-shadow: 0 10px 24px var(--shadow);
+  position: relative;
+  cursor: pointer;
 }
 
 .coins-icon {
@@ -268,12 +297,68 @@ body::before {
   font-size: 15px;
 }
 
+.coins-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  background: var(--panel);
+  border: 1px solid var(--accent-soft);
+  border-radius: 14px;
+  box-shadow: 0 16px 34px var(--shadow);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 24;
+  min-width: 180px;
+  pointer-events: auto;
+}
+
+.coins-info-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+  line-height: 1.5;
+  font-weight: 600;
+}
+
+.coins-info-card {
+  border: 2px solid var(--accent);
+  border-radius: 18px;
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--panel) 92%, var(--accent-soft) 8%);
+  margin-top: 8px;
+  box-shadow: 0 12px 24px var(--shadow);
+}
+
+.coins-info-heading {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 0 10px;
+}
+
+.coins-info-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  font-size: 20px;
+}
+
+.coins-info-days {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .menu-dropdown .nav-button:hover,
 .menu-dropdown .nav-button:focus-visible,
 .settings-dropdown .nav-button:hover,
 .settings-dropdown .nav-button:focus-visible,
 .help-dropdown .nav-button:hover,
-.help-dropdown .nav-button:focus-visible {
+.help-dropdown .nav-button:focus-visible,
+.coins-dropdown .nav-button:hover,
+.coins-dropdown .nav-button:focus-visible {
   background: color-mix(in srgb, var(--accent-soft) 40%, var(--panel) 60%);
   border-color: var(--accent);
   transform: translateY(-1px);
@@ -423,6 +508,11 @@ nav {
   transform: translateY(-1px);
 }
 
+/* Improve contrast for Royal Garden active nav */
+body.theme-royal-garden .nav-button.active {
+  color: #0f261c;
+}
+
 .nav-stack {
   display: flex;
   flex-direction: column;
@@ -554,6 +644,69 @@ body.theme-space .collapse-icon,
 body.theme-cyber .collapse-header,
 body.theme-cyber .collapse-icon {
   color: #e6edff;
+}
+
+/* Boost contrast for Royal Garden */
+body.theme-royal-garden,
+body.theme-royal-garden h1,
+body.theme-royal-garden h2,
+body.theme-royal-garden h3,
+body.theme-royal-garden h4,
+body.theme-royal-garden h5,
+body.theme-royal-garden h6,
+body.theme-royal-garden .panel,
+body.theme-royal-garden .panel h3,
+body.theme-royal-garden .collapse-header,
+body.theme-royal-garden .collapse-icon {
+  color: #fdfcf5;
+}
+
+body.theme-royal-garden .panel p,
+body.theme-royal-garden .muted {
+  color: #d9e7db;
+}
+
+body.theme-royal-garden .menu-dropdown,
+body.theme-royal-garden .settings-dropdown,
+body.theme-royal-garden .help-dropdown,
+body.theme-royal-garden .coins-dropdown,
+body.theme-royal-garden .dropdown-theme-option,
+body.theme-royal-garden .dropdown-theme-select,
+body.theme-royal-garden .dropdown-theme-toggle,
+body.theme-royal-garden .theme-dropdown {
+  border-color: var(--accent);
+  box-shadow: 0 12px 28px rgba(242, 203, 91, 0.26);
+}
+
+body.theme-royal-garden .panel {
+  border-color: rgba(229, 193, 83, 0.2);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.35);
+}
+
+/* Royal Garden: gold icons for help/settings */
+body.theme-royal-garden .settings-launcher svg,
+body.theme-royal-garden .settings-launcher-rect svg,
+body.theme-royal-garden .help-launcher-stack svg {
+  color: #f2cb5b;
+  stroke: #f2cb5b;
+}
+
+body.theme-royal-garden .settings-launcher-rect {
+  color: #f2cb5b;
+  border-color: rgba(242, 203, 91, 0.5);
+}
+
+/* Beach Day: sand outlines on key menus */
+body.theme-beach-day .menu-dropdown,
+body.theme-beach-day .settings-dropdown,
+body.theme-beach-day .help-dropdown,
+body.theme-beach-day .coins-dropdown {
+  border-color: #f5d8a5;
+  background: linear-gradient(145deg, rgba(245, 216, 163, 0.9), rgba(255, 240, 207, 0.82), rgba(255, 249, 234, 0.9));
+  box-shadow:
+    0 14px 30px rgba(12, 27, 51, 0.2),
+    0 0 0 2px rgba(245, 216, 163, 0.7),
+    0 0 24px rgba(245, 216, 163, 0.4);
 }
 
 .create-panel .muted,
@@ -1597,6 +1750,43 @@ body.theme-space {
     radial-gradient(circle at 80% 18%, rgba(120, 90, 255, 0.22), transparent 28%),
     radial-gradient(circle at 64% 78%, rgba(50, 82, 154, 0.2), transparent 36%),
     linear-gradient(180deg, rgba(12, 16, 31, 0.9), rgba(14, 20, 44, 0.85));
+}
+
+body.theme-royal-garden {
+  --bg: #0f261c;
+  --panel: #123626;
+  --accent: #f2cb5b;
+  --accent-soft: #e5c153;
+  --text: #f3f8f2;
+  --muted: #c9ddce;
+  --outline-primary: #10261d;
+  --outline-secondary: #f2cb5b;
+  --glow: rgba(242, 203, 91, 0.2);
+  --shadow: rgba(0, 0, 0, 0.45);
+  --bg-layer:
+    linear-gradient(180deg, #0f261c 0%, #1b4d35 35%, #1f5c40 50%, #1b4d35 65%, #0f261c 100%),
+    radial-gradient(circle at 22% 22%, rgba(146, 228, 177, 0.6), transparent 32%),
+    radial-gradient(circle at 78% 20%, rgba(118, 198, 148, 0.54), transparent 30%),
+    radial-gradient(circle at 38% 78%, rgba(242, 203, 91, 0.32), transparent 34%),
+    radial-gradient(circle at 70% 64%, rgba(255, 222, 140, 0.24), transparent 36%);
+}
+
+body.theme-beach-day {
+  --bg: #0f2547;
+  --panel: #f9fdff;
+  --accent: #0f7dff;
+  --accent-soft: #aedcff;
+  --text: #0b1d35;
+  --muted: #4c6481;
+  --outline-primary: #ffffff;
+  --outline-secondary: #f2d4a3;
+  --glow: rgba(15, 125, 255, 0.18);
+  --shadow: rgba(12, 27, 51, 0.18);
+  --bg-layer:
+    radial-gradient(circle at 20% 18%, rgba(15, 125, 255, 0.28), transparent 30%),
+    radial-gradient(circle at 78% 20%, rgba(0, 174, 255, 0.26), transparent 32%),
+    linear-gradient(180deg, rgba(17, 52, 97, 0.98), rgba(36, 111, 171, 0.78) 42%, rgba(207, 234, 255, 0.95) 68%, rgba(245, 216, 163, 0.82) 100%),
+    linear-gradient(180deg, rgba(245, 216, 163, 0.35), rgba(255, 240, 207, 0.22));
 }
 
 .create-list-panel {
