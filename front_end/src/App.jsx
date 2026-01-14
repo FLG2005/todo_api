@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BadgeInfo as HelpIcon,
+  User as UserIcon,
   FileUser as FileUserIcon,
   House as HomeIcon,
   List as ListIcon,
   Navigation as NavigationIcon,
   ShieldQuestionMark as QueryIcon,
   Settings as SettingsIcon,
-  ChevronDown
+  ChevronDown,
+  Eye,
+  EyeOff,
+  Flame,
+  Coins
 } from "lucide-react";
 
 const themes = {
@@ -137,6 +142,13 @@ export default function App() {
   const [navModalOpen, setNavModalOpen] = useState(false);
   const [getStartedOpen, setGetStartedOpen] = useState(false);
   const [queriesModalOpen, setQueriesModalOpen] = useState(false);
+  const [queriesFaqOpen, setQueriesFaqOpen] = useState(false);
+  const [queriesSupportOpen, setQueriesSupportOpen] = useState(false);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authMode, setAuthMode] = useState("login");
+  const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [user, setUser] = useState(null);
 
   useEffect(() => {
     return () => {
@@ -147,9 +159,70 @@ export default function App() {
   }, [closeMenuTimeout, closeSettingsTimeout, closeHelpTimeout]);
 
   useEffect(() => {
+    try {
+      const stored = localStorage.getItem("authUser");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.username) {
+          setUser(parsed);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to load stored user", err);
+    }
+    setAuthModalOpen(true);
+  }, []);
+
+  useEffect(() => {
+    const modalOpen =
+      showSettings ||
+      deletePrompt ||
+      listPrompt ||
+      navModalOpen ||
+      getStartedOpen ||
+      queriesModalOpen ||
+      queriesFaqOpen ||
+      queriesSupportOpen ||
+      authModalOpen ||
+      !user;
+
+    if (!modalOpen) {
+      document.body.style.overflow = "";
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [
+    showSettings,
+    deletePrompt,
+    listPrompt,
+    navModalOpen,
+    getStartedOpen,
+    queriesModalOpen,
+    queriesFaqOpen,
+    queriesSupportOpen,
+    authModalOpen,
+    user
+  ]);
+
+  useEffect(() => {
     const themeClass = themes[theme]?.className || themes.default.className;
     document.body.className = themeClass;
   }, [theme]);
+
+  useEffect(() => {
+    if (user?.id) {
+      loadLists();
+    } else {
+      setLists([]);
+      setSelectedListId(null);
+    }
+  }, [user?.id]);
 
   useEffect(() => {
     if (selected && selected.list_id && selected.list_id !== selectedListId) {
@@ -221,8 +294,10 @@ export default function App() {
   };
 
   async function loadLists() {
+    if (!user?.id) return;
     try {
-      const data = await api.json(api.url("/lists"));
+      const params = new URLSearchParams({ user_id: user.id });
+      const data = await api.json(api.url(`/lists?${params.toString()}`));
       setLists(data);
       if (data.length > 0) {
         const exists = selectedListId && data.some((l) => l.id === selectedListId);
@@ -241,8 +316,12 @@ export default function App() {
       setTodos([]);
       return;
     }
+    if (!user?.id) {
+      setTodos([]);
+      return;
+    }
     try {
-      const params = new URLSearchParams({ list_id: selectedListId });
+      const params = new URLSearchParams({ list_id: selectedListId, user_id: user.id });
       const data = await api.json(api.url(`/todo_list?${params.toString()}`));
       setTodos(sortTodosByFlags(data));
       updateSummaryText(selectedListId);
@@ -257,8 +336,13 @@ export default function App() {
     const form = event.target;
     const name = form.listName.value.trim();
     if (!name) return;
+    if (!user?.id) {
+      alert("You must be logged in to create a list.");
+      return;
+    }
     try {
-      await api.json(api.url(`/lists?name=${encodeURIComponent(name)}`), { method: "POST" });
+      const params = new URLSearchParams({ name, user_id: user.id });
+      await api.json(api.url(`/lists?${params.toString()}`), { method: "POST" });
       form.reset();
       await loadLists();
     } catch (err) {
@@ -268,8 +352,13 @@ export default function App() {
 
   async function renameList(id, name) {
     if (!name.trim()) return;
+    if (!user?.id) {
+      alert("You must be logged in to rename lists.");
+      return;
+    }
     try {
-      await api.json(api.url(`/lists/${id}?name=${encodeURIComponent(name.trim())}`), { method: "PUT" });
+      const params = new URLSearchParams({ name: name.trim(), user_id: user.id });
+      await api.json(api.url(`/lists/${id}?${params.toString()}`), { method: "PUT" });
       await loadLists();
       if (selectedListId === id) {
         setSelectedListId(id);
@@ -280,8 +369,13 @@ export default function App() {
   }
 
   async function removeList(id) {
+    if (!user?.id) {
+      alert("You must be logged in to delete lists.");
+      return;
+    }
     try {
-      await api.json(api.url(`/lists/${id}`), { method: "DELETE" });
+      const params = new URLSearchParams({ user_id: user.id });
+      await api.json(api.url(`/lists/${id}?${params.toString()}`), { method: "DELETE" });
       if (selectedListId === id) {
         const remaining = lists.filter((l) => l.id !== id);
         const next = remaining[0]?.id || null;
@@ -302,6 +396,10 @@ export default function App() {
 
   async function handleCreate(e) {
     e.preventDefault();
+    if (!user?.id) {
+      alert("You must be logged in to add tasks.");
+      return;
+    }
     if (!selectedListId) {
       alert("Please select or create a list first.");
       return;
@@ -314,7 +412,7 @@ export default function App() {
     if (createDeadline.date && createDeadline.time) {
       deadlineParam = `${createDeadline.date}T${createDeadline.time}:00`;
     }
-    const params = new URLSearchParams({ todo_text: text, list_id: selectedListId });
+    const params = new URLSearchParams({ todo_text: text, list_id: selectedListId, user_id: user.id });
     if (relatedIdValue) params.append("related_id", relatedIdValue);
     if (deadlineParam) params.append("deadline", deadlineParam);
     try {
@@ -329,7 +427,8 @@ export default function App() {
 
   async function handleDelete(id) {
     try {
-      await api.json(api.url(`/delete_a_todo/${id}`), { method: "DELETE" });
+      const params = new URLSearchParams({ user_id: user.id });
+      await api.json(api.url(`/delete_a_todo/${id}?${params.toString()}`), { method: "DELETE" });
       if (selected?.id === id) {
         setSelected(null);
         changeView("lists");
@@ -342,7 +441,7 @@ export default function App() {
 
   async function toggleComplete(id, completed) {
     try {
-      const params = new URLSearchParams({ id, completed });
+      const params = new URLSearchParams({ id, completed, user_id: user.id });
       await api.json(api.url(`/edit_a_todo?${params.toString()}`), { method: "PUT" });
       await loadTodos();
       if (selectedTodo?.id === id) {
@@ -355,7 +454,7 @@ export default function App() {
 
   async function updateFlags(id, flags) {
     try {
-      const params = new URLSearchParams({ id, flags });
+      const params = new URLSearchParams({ id, flags, user_id: user.id });
       await api.json(api.url(`/edit_a_todo?${params.toString()}`), { method: "PUT" });
       await loadTodos();
       if (selectedTodo?.id === id) {
@@ -368,7 +467,8 @@ export default function App() {
 
   async function selectTodo(id) {
     try {
-      const todo = await api.json(api.url(`/fetch_a_todo/${id}`));
+      const params = new URLSearchParams({ user_id: user.id });
+      const todo = await api.json(api.url(`/fetch_a_todo/${id}?${params.toString()}`));
       if (todo.list_id && todo.list_id !== selectedListId) {
         setSelectedListId(todo.list_id);
       }
@@ -387,7 +487,7 @@ export default function App() {
       alert("Text cannot be empty.");
       return;
     }
-    const params = new URLSearchParams({ id: selectedTodo.id, text });
+    const params = new URLSearchParams({ id: selectedTodo.id, text, user_id: user.id });
     try {
       await api.json(api.url(`/edit_a_todo?${params.toString()}`), { method: "PUT" });
       await loadTodos();
@@ -399,7 +499,7 @@ export default function App() {
 
   async function saveRelated(relatedIdValue) {
     if (!selectedTodo) return;
-    const params = new URLSearchParams({ id: selectedTodo.id });
+    const params = new URLSearchParams({ id: selectedTodo.id, user_id: user.id });
     if (relatedIdValue) params.append("related_id", relatedIdValue);
     try {
       await api.json(api.url(`/alter_related_todos?${params.toString()}`), { method: "PUT" });
@@ -412,7 +512,7 @@ export default function App() {
 
   async function saveDeadline(deadlineValue) {
     if (!selectedTodo) return;
-    const params = new URLSearchParams({ id: selectedTodo.id });
+    const params = new URLSearchParams({ id: selectedTodo.id, user_id: user.id });
     if (deadlineValue) params.append("deadline", deadlineValue);
     else params.append("deadline", "");
     try {
@@ -427,7 +527,8 @@ export default function App() {
   async function loadRelated() {
     if (!selectedTodo) return;
     try {
-      const data = await api.json(api.url(`/fetch_related_todos/${selectedTodo.id}`));
+      const params = new URLSearchParams({ user_id: user.id });
+      const data = await api.json(api.url(`/fetch_related_todos/${selectedTodo.id}?${params.toString()}`));
       setRelatedTodos(data.related || []);
     } catch (err) {
       setRelatedTodos([]);
@@ -439,7 +540,8 @@ export default function App() {
     if (!selectedTodo) return;
     setRecommendations("Thinking...");
     try {
-      const recs = await api.json(api.url(`/reccomended_todos/${selectedTodo.id}`), { method: "POST" });
+      const params = new URLSearchParams({ user_id: user.id });
+      const recs = await api.json(api.url(`/reccomended_todos/${selectedTodo.id}?${params.toString()}`), { method: "POST" });
       const lines = recs.todos?.map((t) => `• ${t.text}`).join("\n") || "No recommendations returned.";
       setRecommendations(lines);
     } catch (err) {
@@ -450,7 +552,8 @@ export default function App() {
   async function summariseTodos() {
     setSummary("Summarising...");
     try {
-      const text = await api.text(api.url("/summarise_todos"), { method: "POST" });
+      const params = new URLSearchParams({ user_id: user.id });
+      const text = await api.text(api.url(`/summarise_todos?${params.toString()}`), { method: "POST" });
       setSummary(cleanAiText(text));
     } catch (err) {
       setSummary(`Unable to summarise: ${err.message}`);
@@ -460,7 +563,8 @@ export default function App() {
   async function summariseList(listId) {
     setListSummaries((prev) => ({ ...prev, [listId]: "Summarising..." }));
     try {
-      const text = await api.text(api.url(`/summarise_todos?list_id=${listId}`), { method: "POST" });
+      const params = new URLSearchParams({ list_id: listId, user_id: user.id });
+      const text = await api.text(api.url(`/summarise_todos?${params.toString()}`), { method: "POST" });
       const cleaned = cleanAiText(text);
       setListSummaries((prev) => ({ ...prev, [listId]: cleaned }));
       if (listId === selectedListId) {
@@ -480,6 +584,53 @@ export default function App() {
       setSummary(listSummaries[listId]);
     }
   };
+
+  const handleAuth = async (mode, username, password) => {
+    setAuthError("");
+    setAuthLoading(true);
+    try {
+      const data = await api.json(api.url(`/auth/${mode}`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      const withSecret = { ...data, password };
+      setUser(withSecret);
+      localStorage.setItem("authUser", JSON.stringify(withSecret));
+      setAuthModalOpen(false);
+    } catch (err) {
+      let friendly = "Unable to authenticate";
+      if (err?.message) {
+        try {
+          const parsed = JSON.parse(err.message);
+          friendly = parsed?.detail || friendly;
+        } catch {
+          friendly = err.message;
+        }
+      }
+      setAuthError(friendly);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  if (!user) {
+    return (
+      <div className="app">
+        <AuthModal
+          open
+          mode={authMode}
+          onModeChange={(next) => {
+            setAuthMode(next);
+            setAuthError("");
+          }}
+          onSubmit={(username, password) => handleAuth(authMode, username, password)}
+          loading={authLoading}
+          error={authError}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -527,6 +678,13 @@ export default function App() {
             </button>
           </div>
         )}
+        <div className="coins-card" aria-label="Check coins">
+          <Coins className="coins-icon" aria-hidden="true" />
+          <div className="coins-meta">
+            <span className="coins-label">Check coins</span>
+            <span className="coins-value">0</span>
+          </div>
+        </div>
       </div>
       <div className="layout">
         <div className="content-area">
@@ -640,7 +798,22 @@ export default function App() {
                     </div>
                   </div>
                   <button className="nav-button full" onClick={() => setShowSettings(true)}>
-                    Open settings
+                    Open settings <SettingsIcon className="menu-icon" aria-hidden="true" />
+                  </button>
+                  <button
+                    className="nav-button full"
+                    onClick={() => {
+                      setSettingsHoverOpen(false);
+                      setShowSettings(true);
+                      setTimeout(() => {
+                        const profileOpenButton = document.getElementById("profile-open-btn");
+                        if (profileOpenButton) {
+                          profileOpenButton.focus();
+                        }
+                      }, 0);
+                    }}
+                  >
+                    Profile <UserIcon className="menu-icon" aria-hidden="true" />
                   </button>
                 </div>
               )}
@@ -836,6 +1009,8 @@ export default function App() {
         onClose={() => setShowSettings(false)}
         theme={theme}
         setTheme={setTheme}
+        user={user}
+        setUser={setUser}
       />
 
       <DeleteModal
@@ -868,7 +1043,31 @@ export default function App() {
         }}
       />
       <GetStartedModal open={getStartedOpen} onClose={() => setGetStartedOpen(false)} />
-      <QueriesModal open={queriesModalOpen} onClose={() => setQueriesModalOpen(false)} />
+      <QueriesModal
+        open={queriesModalOpen}
+        onClose={() => setQueriesModalOpen(false)}
+        onOpenFaq={() => {
+          setQueriesModalOpen(false);
+          setQueriesFaqOpen(true);
+        }}
+        onOpenSupport={() => {
+          setQueriesModalOpen(false);
+          setQueriesSupportOpen(true);
+        }}
+      />
+      <QueriesFaqModal open={queriesFaqOpen} onClose={() => setQueriesFaqOpen(false)} />
+      <QueriesSupportModal open={queriesSupportOpen} onClose={() => setQueriesSupportOpen(false)} />
+      <AuthModal
+        open={authModalOpen || !user}
+        mode={authMode}
+        onModeChange={(next) => {
+          setAuthMode(next);
+          setAuthError("");
+        }}
+        onSubmit={(username, password) => handleAuth(authMode, username, password)}
+        loading={authLoading}
+        error={authError}
+      />
     </div>
   );
 }
@@ -1028,9 +1227,10 @@ function CollapsibleList({ list, isSelected, onOpen, onRename, onDelete, onSumma
   );
 }
 
-function SettingsPanel({ open, onClose, theme, setTheme }) {
+function SettingsPanel({ open, onClose, theme, setTheme, user, setUser }) {
   if (!open) return null;
   const [openSelect, setOpenSelect] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   const chooseTheme = (key) => {
     setTheme(key);
@@ -1046,6 +1246,15 @@ function SettingsPanel({ open, onClose, theme, setTheme }) {
           <button className="settings-close" onClick={onClose} aria-label="Close settings">✕</button>
         </div>
         <p className="muted">Choose a theme. Themes apply everywhere and color your task outlines.</p>
+        <div className="panel" style={{ marginBottom: "16px" }}>
+          <div className="panel-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontWeight: 600 }}>Profile</div>
+              <div className="muted">View your account details.</div>
+            </div>
+            <button id="profile-open-btn" className="button secondary" onClick={() => setProfileOpen(true)}>Open</button>
+          </div>
+        </div>
         <div className="theme-dropdown">
           <button className="theme-select" onClick={() => setOpenSelect((o) => !o)} aria-haspopup="listbox" aria-expanded={openSelect}>
             <span>Theme</span>
@@ -1071,6 +1280,7 @@ function SettingsPanel({ open, onClose, theme, setTheme }) {
           )}
         </div>
       </div>
+      <ProfileModal open={profileOpen} onClose={() => setProfileOpen(false)} user={user} setUser={setUser} />
     </div>
   );
 }
@@ -1424,7 +1634,7 @@ function MenuDropdownIllustration() {
   );
 }
 
-function QueriesModal({ open, onClose }) {
+function QueriesModal({ open, onClose, onOpenFaq, onOpenSupport }) {
   if (!open) return null;
   return (
     <div className="modal">
@@ -1459,9 +1669,624 @@ function QueriesModal({ open, onClose }) {
           Questions, feedback, or support requests can be submitted here. We’re committed to helping you work smarter and more efficiently.
         </p>
         <div className="modal-actions" style={{ justifyContent: "stretch" }}>
-          <button className="button" style={{ flex: 1, whiteSpace: "nowrap" }}>Commonly asked questions</button>
-          <button className="button" style={{ flex: 1 }}>Contact support</button>
+          <button className="button" style={{ flex: 1, whiteSpace: "nowrap" }} onClick={onOpenFaq}>
+            Commonly asked questions
+          </button>
+          <button className="button" style={{ flex: 1 }} onClick={onOpenSupport}>
+            Contact support
+          </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function QueriesFaqModal({ open, onClose }) {
+  if (!open) return null;
+  return (
+    <div className="modal">
+      <div className="modal-backdrop" onClick={onClose} aria-hidden="true"></div>
+      <div
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="queries-faq-modal-title"
+        style={{ width: "min(820px, 94vw)" }}
+      >
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          style={{
+            position: "absolute",
+            top: "12px",
+            right: "12px",
+            background: "none",
+            border: "none",
+            fontSize: "18px",
+            cursor: "pointer",
+            color: "var(--muted)",
+            padding: "8px",
+            lineHeight: 1
+          }}
+        >
+          ✕
+        </button>
+        <h3 id="queries-faq-modal-title" style={{ textAlign: "center", marginBottom: "8px" }}>
+          Common questions, clear answers
+        </h3>
+        <p style={{ textAlign: "center", marginBottom: "20px", marginTop: "0" }} className="muted">
+          Browse quick answers to the topics we hear most often so you can keep moving without waiting on support.
+        </p>
+        <div className="panel-grid" style={{ gap: "16px" }}>
+          <div className="panel">
+            <h4 style={{ marginTop: 0 }}>Getting started</h4>
+            <ul className="muted" style={{ margin: "8px 0 0 0", paddingLeft: "16px", lineHeight: 1.6 }}>
+              <li>How to create and organize new lists.</li>
+              <li>Tips for keeping tasks prioritized.</li>
+              <li>Saving your favorite templates.</li>
+            </ul>
+          </div>
+          <div className="panel">
+            <h4 style={{ marginTop: 0 }}>Working smarter</h4>
+            <ul className="muted" style={{ margin: "8px 0 0 0", paddingLeft: "16px", lineHeight: 1.6 }}>
+              <li>Generating recommendations for tricky tasks.</li>
+              <li>Linking related todos for better context.</li>
+              <li>Setting deadlines and reminders.</li>
+            </ul>
+          </div>
+          <div className="panel">
+            <h4 style={{ marginTop: 0 }}>Account & support</h4>
+            <ul className="muted" style={{ margin: "8px 0 0 0", paddingLeft: "16px", lineHeight: 1.6 }}>
+              <li>Managing preferences and theme choices.</li>
+              <li>What to include when submitting feedback.</li>
+              <li>How to reach the team for deeper help.</li>
+            </ul>
+          </div>
+        </div>
+        <div className="modal-actions" style={{ marginTop: "20px", justifyContent: "flex-end" }}>
+          <button className="button secondary" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QueriesSupportModal({ open, onClose }) {
+  if (!open) return null;
+  const [supportMessage, setSupportMessage] = useState("");
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const body = encodeURIComponent(supportMessage || "No details provided.");
+    const subject = encodeURIComponent("Support request");
+    window.location.href = `mailto:fabiangaertner0112@icloud.com?subject=${subject}&body=${body}`;
+    onClose();
+  };
+
+  return (
+    <div className="modal">
+      <div className="modal-backdrop" onClick={onClose} aria-hidden="true"></div>
+      <div
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="queries-support-modal-title"
+        style={{ width: "min(820px, 94vw)" }}
+      >
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          style={{
+            position: "absolute",
+            top: "12px",
+            right: "12px",
+            background: "none",
+            border: "none",
+            fontSize: "18px",
+            cursor: "pointer",
+            color: "var(--muted)",
+            padding: "8px",
+            lineHeight: 1
+          }}
+        >
+          ✕
+        </button>
+        <h3 id="queries-support-modal-title" style={{ textAlign: "center", marginBottom: "8px" }}>
+          We&apos;re here to help!
+        </h3>
+        <form onSubmit={handleSubmit}>
+          <div className="panel" style={{ marginTop: "16px" }}>
+            <label className="muted" style={{ display: "block", marginBottom: "8px" }}>
+              Have a problem? Let us know!
+            </label>
+            <input
+              type="text"
+              placeholder="Share what’s happening"
+              style={{ width: "100%" }}
+              value={supportMessage}
+              onChange={(e) => setSupportMessage(e.target.value)}
+            />
+          </div>
+          <div className="modal-actions" style={{ marginTop: "16px", justifyContent: "flex-end" }}>
+            <button className="button" type="submit" disabled title="Sending temporarily disabled">
+              Send
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+const parseApiError = (err, fallback) => {
+  if (err?.message) {
+    try {
+      const parsed = JSON.parse(err.message);
+      return parsed?.detail || fallback;
+    } catch {
+      return err.message;
+    }
+  }
+  return fallback;
+};
+
+function ProfileModal({ open, onClose, user, setUser }) {
+  const [showPassword, setShowPassword] = useState(false);
+  const [usernameModalOpen, setUsernameModalOpen] = useState(false);
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const storedPassword = user?.password || "";
+  const hasPassword = Boolean(storedPassword);
+  const maskedPassword = hasPassword ? "•".repeat(Math.max(storedPassword.length, 8)) : "";
+  const displayPassword = hasPassword
+    ? showPassword
+      ? storedPassword
+      : maskedPassword
+    : "Password not stored. Log out and sign in again to view.";
+  const loginStreak = Number.isFinite(user?.login_streak) ? user.login_streak : 0;
+
+  const handleCloseAll = () => {
+    setUsernameModalOpen(false);
+    setPasswordModalOpen(false);
+    onClose();
+  };
+
+  if (!open) return null;
+  if (!user) {
+    return (
+      <div className="modal">
+        <div className="modal-backdrop" onClick={handleCloseAll} aria-hidden="true"></div>
+        <div className="modal-content" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" style={{ width: "min(520px, 94vw)" }}>
+          <button
+            onClick={handleCloseAll}
+            aria-label="Close"
+            style={{
+              position: "absolute",
+              top: "12px",
+              right: "12px",
+              background: "none",
+              border: "none",
+              fontSize: "18px",
+              cursor: "pointer",
+              color: "var(--muted)",
+              padding: "8px",
+              lineHeight: 1
+            }}
+          >
+            ✕
+          </button>
+          <h3 id="profile-modal-title" style={{ textAlign: "center", marginBottom: "12px" }}>
+            My Profile
+          </h3>
+          <div className="status error">No user loaded. Please log in again.</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="modal">
+        <div className="modal-backdrop" onClick={handleCloseAll} aria-hidden="true"></div>
+        <div
+          className="modal-content"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="profile-modal-title"
+          style={{ width: "min(520px, 94vw)" }}
+        >
+          <button
+            onClick={handleCloseAll}
+            aria-label="Close"
+            style={{
+              position: "absolute",
+              top: "12px",
+              right: "12px",
+              background: "none",
+              border: "none",
+              fontSize: "18px",
+              cursor: "pointer",
+              color: "var(--muted)",
+              padding: "8px",
+              lineHeight: 1
+            }}
+          >
+            ✕
+          </button>
+          <h3 id="profile-modal-title" style={{ textAlign: "center", marginBottom: "12px" }}>
+            My Profile
+          </h3>
+          <div className="panel streak-card" style={{ marginTop: "8px" }}>
+            <label className="muted" style={{ display: "block", marginBottom: "6px" }}>Login streak</label>
+            <div style={{ fontWeight: 700, fontSize: "16px", display: "flex", alignItems: "center", gap: "6px" }}>
+              <span>{loginStreak} day{loginStreak === 1 ? "" : "s"}</span>
+              <Flame size={18} color="var(--accent)" />
+            </div>
+          </div>
+          <div className="panel" style={{ marginTop: "8px" }}>
+            <label className="muted" style={{ display: "block", marginBottom: "6px" }}>Username</label>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <input type="text" value={user?.username || ""} readOnly style={{ flex: 1 }} />
+              <button className="button" type="button" onClick={() => setUsernameModalOpen(true)}>Change username</button>
+            </div>
+          </div>
+          <div className="panel" style={{ marginTop: "12px" }}>
+            <label className="muted" style={{ display: "block", marginBottom: "6px" }}>Password</label>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <input
+                type={hasPassword ? (showPassword ? "text" : "password") : "text"}
+                value={displayPassword}
+                readOnly
+                style={{ flex: 1 }}
+              />
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  type="button"
+                className="button secondary"
+                onClick={() => hasPassword && setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+                disabled={!hasPassword}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+                <button className="button" type="button" onClick={() => setPasswordModalOpen(true)}>Change password</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <UpdateUsernameModal
+        open={usernameModalOpen}
+        onClose={() => setUsernameModalOpen(false)}
+        user={user}
+        setUser={setUser}
+      />
+      <UpdatePasswordModal
+        open={passwordModalOpen}
+        onClose={() => setPasswordModalOpen(false)}
+        user={user}
+        setUser={setUser}
+        onHidePassword={() => setShowPassword(false)}
+      />
+    </>
+  );
+}
+
+function UpdateUsernameModal({ open, onClose, user, setUser }) {
+  const [newUsername, setNewUsername] = useState(user?.username || "");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [updating, setUpdating] = useState(false);
+
+  useEffect(() => {
+    setNewUsername(user?.username || "");
+    setCurrentPassword("");
+    setStatus("");
+    setError("");
+    setUpdating(false);
+  }, [user, open]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!user?.id) {
+      setError("No user loaded");
+      return;
+    }
+    setStatus("");
+    setError("");
+    setUpdating(true);
+    try {
+      const data = await api.json(api.url("/auth/update_username"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.id,
+          new_username: newUsername,
+          current_password: currentPassword
+        })
+      });
+      const updated = { ...user, username: data.username };
+      if (setUser) setUser(updated);
+      localStorage.setItem("authUser", JSON.stringify(updated));
+      setStatus("Username updated.");
+      setCurrentPassword("");
+    } catch (err) {
+      setError(parseApiError(err, "Unable to update username"));
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className="modal">
+      <div className="modal-backdrop" onClick={onClose} aria-hidden="true"></div>
+      <div
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="update-username-title"
+        style={{ width: "min(520px, 94vw)" }}
+      >
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          style={{
+            position: "absolute",
+            top: "12px",
+            right: "12px",
+            background: "none",
+            border: "none",
+            fontSize: "18px",
+            cursor: "pointer",
+            color: "var(--muted)",
+            padding: "8px",
+            lineHeight: 1
+          }}
+        >
+          ✕
+        </button>
+        <h3 id="update-username-title" style={{ textAlign: "center", marginBottom: "12px" }}>
+          Change username
+        </h3>
+        <form onSubmit={handleSubmit}>
+          <div className="panel" style={{ marginTop: "8px" }}>
+            <label className="muted" style={{ display: "block", marginBottom: "6px" }}>New username</label>
+            <input
+              type="text"
+              value={newUsername}
+              onChange={(e) => setNewUsername(e.target.value)}
+              required
+              placeholder="New username"
+            />
+            <label className="muted" style={{ display: "block", margin: "10px 0 6px" }}>Current password</label>
+            <input
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              required
+              placeholder="Current password"
+            />
+          </div>
+          {(status || error) && (
+            <div className={`status ${error ? "error" : "success"}`} style={{ marginTop: "12px" }}>
+              {error || status}
+            </div>
+          )}
+          <div className="modal-actions" style={{ marginTop: "16px", justifyContent: "flex-end" }}>
+            <button className="button secondary" type="button" onClick={onClose}>Cancel</button>
+            <button className="button" type="submit" disabled={updating}>
+              {updating ? "Updating..." : "Save username"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function UpdatePasswordModal({ open, onClose, user, setUser, onHidePassword }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [updating, setUpdating] = useState(false);
+
+  useEffect(() => {
+    setCurrentPassword("");
+    setNewPassword("");
+    setStatus("");
+    setError("");
+    setUpdating(false);
+  }, [user, open]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!user?.id) {
+      setError("No user loaded");
+      return;
+    }
+    setStatus("");
+    setError("");
+    setUpdating(true);
+    try {
+      await api.json(api.url("/auth/update_password"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: user.id,
+          current_password: currentPassword,
+          new_password: newPassword
+        })
+      });
+      const updated = { ...user, password: newPassword };
+      if (setUser) setUser(updated);
+      localStorage.setItem("authUser", JSON.stringify(updated));
+      setStatus("Password updated.");
+      setCurrentPassword("");
+      setNewPassword("");
+      if (onHidePassword) onHidePassword();
+    } catch (err) {
+      setError(parseApiError(err, "Unable to update password"));
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className="modal">
+      <div className="modal-backdrop" onClick={onClose} aria-hidden="true"></div>
+      <div
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="update-password-title"
+        style={{ width: "min(520px, 94vw)" }}
+      >
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          style={{
+            position: "absolute",
+            top: "12px",
+            right: "12px",
+            background: "none",
+            border: "none",
+            fontSize: "18px",
+            cursor: "pointer",
+            color: "var(--muted)",
+            padding: "8px",
+            lineHeight: 1
+          }}
+        >
+          ✕
+        </button>
+        <h3 id="update-password-title" style={{ textAlign: "center", marginBottom: "12px" }}>
+          Change password
+        </h3>
+        <form onSubmit={handleSubmit}>
+          <div className="panel" style={{ marginTop: "8px" }}>
+            <label className="muted" style={{ display: "block", marginBottom: "6px" }}>Current password</label>
+            <input
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              required
+              placeholder="Current password"
+            />
+            <label className="muted" style={{ display: "block", margin: "10px 0 6px" }}>New password</label>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              required
+              placeholder="New password"
+            />
+          </div>
+          {(status || error) && (
+            <div className={`status ${error ? "error" : "success"}`} style={{ marginTop: "12px" }}>
+              {error || status}
+            </div>
+          )}
+          <div className="modal-actions" style={{ marginTop: "16px", justifyContent: "flex-end" }}>
+            <button className="button secondary" type="button" onClick={onClose}>Cancel</button>
+            <button className="button" type="submit" disabled={updating}>
+              {updating ? "Updating..." : "Save password"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+function AuthModal({ open, mode, onModeChange, onSubmit, loading, error }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
+  useEffect(() => {
+    setUsername("");
+    setPassword("");
+  }, [mode, open]);
+
+  if (!open) return null;
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSubmit(username, password);
+  };
+
+  return (
+    <div className="modal">
+      <div className="modal-backdrop" aria-hidden="true"></div>
+      <div
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="auth-modal-title"
+        style={{ width: "min(460px, 94vw)" }}
+      >
+        <h3 id="auth-modal-title" style={{ textAlign: "center", marginBottom: "12px" }}>
+          {mode === "login" ? "Welcome back" : "Create your account"}
+        </h3>
+        <p className="muted" style={{ textAlign: "center", marginTop: 0, marginBottom: "16px" }}>
+          {mode === "login" ? "Log in to access your todos." : "Sign up to save your todos."}
+        </p>
+        <form onSubmit={handleSubmit}>
+          <div className="panel" style={{ marginTop: "8px" }}>
+            <label className="muted" style={{ display: "block", marginBottom: "8px" }}>Username</label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Username"
+              required
+            />
+          </div>
+          <div className="panel" style={{ marginTop: "12px" }}>
+            <label className="muted" style={{ display: "block", marginBottom: "8px" }}>Password</label>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password"
+                required
+                style={{ flex: 1 }}
+              />
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
+          {error ? (
+            <div className="status error" style={{ marginTop: "12px" }}>
+              {error}
+            </div>
+          ) : null}
+          <div className="modal-actions" style={{ marginTop: "16px", justifyContent: "space-between", alignItems: "center" }}>
+            <button
+              type="button"
+              className="button secondary"
+              onClick={() => onModeChange(mode === "login" ? "signup" : "login")}
+            >
+              {mode === "login" ? "Create account" : "Have an account? Log in"}
+            </button>
+            <button className="button" type="submit" disabled={loading}>
+              {loading ? "Working..." : mode === "login" ? "Log in" : "Sign up"}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
