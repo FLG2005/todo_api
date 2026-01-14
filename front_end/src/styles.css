@@ -73,9 +73,9 @@ body::before {
   box-shadow: 0 12px 30px var(--shadow);
   border-radius: 18px;
   padding: 18px;
-  display: grid;
-  grid-template-columns: 60px 1fr;
-  align-items: center;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
   min-height: 100%;
   gap: 12px;
 }
@@ -90,23 +90,25 @@ body::before {
   text-align: center;
   margin: 0;
   align-self: stretch;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 8px 0;
   border-right: 1px solid var(--accent-soft);
 }
 
 .sidebar-body {
   margin-top: 0;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 16px;
   width: 100%;
-  align-content: center;
+  justify-content: center;
 }
 
 .content-area {
-  display: grid;
-  grid-template-rows: auto 1fr;
+  display: flex;
+  flex-direction: column;
   align-items: stretch;
   gap: 18px;
   width: 100%;
@@ -120,8 +122,9 @@ body::before {
   color: var(--text);
   width: 48px;
   height: 48px;
-  display: grid;
-  place-items: center;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   border-radius: 50%;
   cursor: pointer;
   box-shadow: 0 12px 22px var(--shadow);
@@ -192,7 +195,8 @@ body::before {
   border-radius: 22px;
   box-shadow: 0 16px 34px var(--shadow);
   padding: 10px;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   z-index: 24;
   min-width: 180px;
@@ -207,7 +211,8 @@ body::before {
   border-radius: 18px;
   box-shadow: 0 16px 34px var(--shadow);
   padding: 10px;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   z-index: 24;
   min-width: 180px;
@@ -253,7 +258,8 @@ body::before {
 }
 
 .dropdown-theme-grid {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
 }
 
@@ -312,7 +318,8 @@ body::before {
   border-radius: 14px;
   box-shadow: 0 14px 30px var(--shadow);
   padding: 8px;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
   z-index: 5;
 }
@@ -379,12 +386,14 @@ nav {
 }
 
 .nav-stack {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
 }
 
 main {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 20px;
   min-height: calc(100vh - 120px);
   width: 100%;
@@ -403,13 +412,14 @@ section {
 }
 
 section.active {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 18px;
 }
 
 .hero {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 18px;
   align-items: center;
 }
@@ -457,9 +467,13 @@ section.active {
 }
 
 .panel-grid {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.panel-grid>* {
+  flex: 1 1 280px;
 }
 
 .create-panel {
@@ -518,7 +532,8 @@ body.theme-cyber .collapse-icon {
   border: 1px solid var(--accent-soft);
   border-radius: 14px;
   padding: 14px;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
 }
 
@@ -534,7 +549,8 @@ body.theme-cyber .collapse-icon {
 }
 
 form {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
 }
 
@@ -555,8 +571,9 @@ textarea {
 }
 
 .list {
-  display: grid;
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
 }
 
 .task-card {
@@ -565,18 +582,26 @@ textarea {
   background: color-mix(in srgb, var(--panel) 88%, var(--outline-primary) 12%);
   border-radius: 14px;
   padding: 12px;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
   transition: transform 0.15s ease;
+  cursor: pointer;
 }
 
 .task-card.list-card {
-  padding: 12px 14px;
+  padding: 8px 12px;
   border-width: 2px;
   border-radius: 14px;
   box-shadow: inset 0 0 0 3px var(--outline-primary), 0 10px 24px var(--shadow);
   background: color-mix(in srgb, var(--panel) 88%, var(--outline-primary) 12%);
-  gap: 6px;
+  gap: 4px;
+  height: 100px;
+  align-content: center;
+}
+
+.task-card.list-card.open {
+  height: auto;
 }
 
 .list-count-banner {
@@ -596,6 +621,15 @@ textarea {
 .task-card.active-card {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 3px var(--outline-primary), 0 12px 28px var(--shadow);
+}
+
+.list-chevron {
+  transition: transform 0.2s ease;
+  color: var(--muted);
+}
+
+.list-chevron.open {
+  transform: rotate(180deg);
 }
 
 .task-card .task-row {
@@ -688,7 +722,8 @@ textarea {
   border-radius: 12px;
   box-shadow: 0 12px 28px var(--shadow);
   padding: 8px;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
   z-index: 10;
   min-width: 140px;
@@ -776,7 +811,8 @@ textarea {
 }
 
 .deadline-select {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
@@ -1504,4 +1540,35 @@ body.theme-space {
     radial-gradient(circle at 80% 18%, rgba(120, 90, 255, 0.22), transparent 28%),
     radial-gradient(circle at 64% 78%, rgba(50, 82, 154, 0.2), transparent 36%),
     linear-gradient(180deg, rgba(12, 16, 31, 0.9), rgba(14, 20, 44, 0.85));
+}
+
+.create-list-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 14px;
+}
+
+.create-list-panel h3 {
+  white-space: nowrap;
+}
+
+.create-list-panel form {
+  display: flex;
+  flex-grow: 1;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+}
+
+.create-list-panel input {
+  padding: 8px 12px;
+}
+
+.create-list-panel button {
+  width: auto;
+  white-space: nowrap;
+  padding: 8px 16px;
+  margin-top: 0;
 }

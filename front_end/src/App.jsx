@@ -6,7 +6,8 @@ import {
   List as ListIcon,
   Navigation as NavigationIcon,
   ShieldQuestionMark as QueryIcon,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  ChevronDown
 } from "lucide-react";
 
 const themes = {
@@ -135,6 +136,7 @@ export default function App() {
   const [closeHelpTimeout, setCloseHelpTimeout] = useState(null);
   const [navModalOpen, setNavModalOpen] = useState(false);
   const [getStartedOpen, setGetStartedOpen] = useState(false);
+  const [queriesModalOpen, setQueriesModalOpen] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -518,6 +520,7 @@ export default function App() {
               className="nav-button full"
               onClick={() => {
                 setHelpOpen(false);
+                setQueriesModalOpen(true);
               }}
             >
               Queries <QueryIcon className="menu-icon" aria-hidden="true" />
@@ -669,19 +672,6 @@ export default function App() {
             </section>
 
             <section className={view === "lists" ? "active" : ""} id="lists">
-              <div className="split">
-                <div className="panel">
-                  <h3>Create a list</h3>
-                  <form onSubmit={createList}>
-                    <input name="listName" type="text" placeholder="List name" required />
-                    <button type="submit" className="button">Add list</button>
-                  </form>
-                </div>
-                <div className="panel">
-                  <h3>Manage lists</h3>
-                  <p>Create, rename, or delete lists. Open a list to work on its tasks.</p>
-                </div>
-              </div>
               <div className="list">
                 {lists.length === 0 && <div className="status">No lists yet. Create one to get started.</div>}
                 {lists.map((list) => (
@@ -696,6 +686,13 @@ export default function App() {
                     summary={listSummaries[list.id]}
                   />
                 ))}
+              </div>
+              <div className="panel create-list-panel" style={{ marginTop: "16px" }}>
+                <h3>Create a list</h3>
+                <form onSubmit={createList}>
+                  <input name="listName" type="text" placeholder="List name" required />
+                  <button type="submit" className="button">Add list</button>
+                </form>
               </div>
             </section>
 
@@ -871,6 +868,7 @@ export default function App() {
         }}
       />
       <GetStartedModal open={getStartedOpen} onClose={() => setGetStartedOpen(false)} />
+      <QueriesModal open={queriesModalOpen} onClose={() => setQueriesModalOpen(false)} />
     </div>
   );
 }
@@ -1013,6 +1011,7 @@ function CollapsibleList({ list, isSelected, onOpen, onRename, onDelete, onSumma
       </div>
       <div className="task-row">
         <div className="task-title">{list.name}</div>
+        <ChevronDown className={`list-chevron ${open ? "open" : ""}`} size={16} />
       </div>
       {open && (
         <>
@@ -1109,10 +1108,27 @@ function DeleteModal({ todo, onConfirm, onCancel }) {
     <div className="modal">
       <div className="modal-backdrop" onClick={onCancel} aria-hidden="true"></div>
       <div className="modal-content" role="dialog" aria-modal="true" aria-labelledby="delete-title">
+        <button
+          onClick={onCancel}
+          aria-label="Close"
+          style={{
+            position: "absolute",
+            top: "12px",
+            right: "12px",
+            background: "none",
+            border: "none",
+            fontSize: "18px",
+            cursor: "pointer",
+            color: "var(--muted)",
+            padding: "8px",
+            lineHeight: 1
+          }}
+        >
+          ✕
+        </button>
         <h3 id="delete-title">Delete task?</h3>
         <p>Are you sure you want to delete “{todo.text}”?</p>
         <div className="modal-actions">
-          <button className="button secondary" onClick={onCancel}>No</button>
           <button className="button" onClick={onConfirm}>Yes, delete</button>
         </div>
       </div>
@@ -1135,13 +1151,30 @@ function ListModal({ prompt, onCancel, onRename, onDelete }) {
     <div className="modal">
       <div className="modal-backdrop" onClick={onCancel} aria-hidden="true"></div>
       <div className="modal-content" role="dialog" aria-modal="true" aria-labelledby="list-modal-title">
+        <button
+          onClick={onCancel}
+          aria-label="Close"
+          style={{
+            position: "absolute",
+            top: "12px",
+            right: "12px",
+            background: "none",
+            border: "none",
+            fontSize: "18px",
+            cursor: "pointer",
+            color: "var(--muted)",
+            padding: "8px",
+            lineHeight: 1
+          }}
+        >
+          ✕
+        </button>
         <h3 id="list-modal-title">{isRename ? "Rename list" : "Delete list?"}</h3>
         {isRename ? (
           <>
             <p className="muted">Update the name for “{list.name}”.</p>
             <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="List name" />
             <div className="modal-actions">
-              <button className="button secondary" onClick={onCancel}>Cancel</button>
               <button className="button" onClick={() => onRename(list.id, value)}>Save</button>
             </div>
           </>
@@ -1149,7 +1182,6 @@ function ListModal({ prompt, onCancel, onRename, onDelete }) {
           <>
             <p>Are you sure you want to delete “{list.name}” and its tasks?</p>
             <div className="modal-actions">
-              <button className="button secondary" onClick={onCancel}>No</button>
               <button className="button" onClick={() => onDelete(list.id)}>Yes, delete</button>
             </div>
           </>
@@ -1171,12 +1203,30 @@ function NavigationModal({ open, onClose, onGetStarted }) {
         aria-labelledby="nav-modal-title"
         aria-describedby="nav-modal-desc"
       >
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          style={{
+            position: "absolute",
+            top: "12px",
+            right: "12px",
+            background: "none",
+            border: "none",
+            fontSize: "18px",
+            cursor: "pointer",
+            color: "var(--muted)",
+            padding: "8px",
+            lineHeight: 1,
+            zIndex: 10
+          }}
+        >
+          ✕
+        </button>
         <div className="nav-modal-header">
           <h3 id="nav-modal-title">Navigation Menu</h3>
           <p id="nav-modal-desc" className="muted nav-modal-desc">Never take a wrong turn again!</p>
         </div>
         <div className="modal-actions">
-          <button className="button secondary" onClick={onClose}>Close</button>
           <button className="button" onClick={onGetStarted}>Get Started</button>
         </div>
       </div>
@@ -1196,6 +1246,25 @@ function GetStartedModal({ open, onClose }) {
         aria-labelledby="get-started-title"
         aria-describedby="get-started-desc"
       >
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          style={{
+            position: "absolute",
+            top: "12px",
+            right: "12px",
+            background: "none",
+            border: "none",
+            fontSize: "18px",
+            cursor: "pointer",
+            color: "var(--muted)",
+            padding: "8px",
+            lineHeight: 1,
+            zIndex: 10
+          }}
+        >
+          ✕
+        </button>
         <div className="nav-modal-header">
           <h3 id="get-started-title">Get to know your way around!</h3>
           <p id="get-started-desc" className="muted nav-modal-desc">Quick pointers will show you where to go next.</p>
@@ -1209,8 +1278,8 @@ function GetStartedModal({ open, onClose }) {
             lists stored safely, and the Current List tab lets you add, edit, or delete tasks from the list you’ve selected!
           </p>
         </div>
-        <div className="modal-actions">
-          <button className="button" onClick={onClose}>Okay, got it!</button>
+        <div className="modal-actions" style={{ justifyContent: "center" }}>
+          {/* Actions removed as per instruction to use X button primarily, though "Okay got it" was an acknowledgment. */}
         </div>
       </div>
     </div>
@@ -1352,5 +1421,48 @@ function MenuDropdownIllustration() {
         <path d="M192 190 h12" stroke="#2d1f15" strokeWidth="2.5" strokeLinecap="round" />
       </g>
     </svg>
+  );
+}
+
+function QueriesModal({ open, onClose }) {
+  if (!open) return null;
+  return (
+    <div className="modal">
+      <div className="modal-backdrop" onClick={onClose} aria-hidden="true"></div>
+      <div
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="queries-modal-title"
+        style={{ width: "min(800px, 92vw)" }}
+      >
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          style={{
+            position: "absolute",
+            top: "12px",
+            right: "12px",
+            background: "none",
+            border: "none",
+            fontSize: "18px",
+            cursor: "pointer",
+            color: "var(--muted)",
+            padding: "8px",
+            lineHeight: 1
+          }}
+        >
+          ✕
+        </button>
+        <h3 id="queries-modal-title" style={{ textAlign: "center", marginBottom: "8px" }}>Hit a roadblock?</h3>
+        <p style={{ textAlign: "center", marginBottom: "24px", marginTop: "0" }} className="muted">
+          Questions, feedback, or support requests can be submitted here. We’re committed to helping you work smarter and more efficiently.
+        </p>
+        <div className="modal-actions" style={{ justifyContent: "stretch" }}>
+          <button className="button" style={{ flex: 1, whiteSpace: "nowrap" }}>Commonly asked questions</button>
+          <button className="button" style={{ flex: 1 }}>Contact support</button>
+        </div>
+      </div>
+    </div>
   );
 }
