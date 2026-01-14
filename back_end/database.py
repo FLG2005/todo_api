@@ -1,6 +1,7 @@
 import sqlite3
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 
 # Always store the database next to this file so the API uses one consistent DB
 DB_FILE = Path(__file__).resolve().with_name("todo.db")
@@ -23,9 +24,11 @@ def connect() -> sqlite3.Connection:
 
 def create_table(conn: sqlite3.Connection) -> None:
     """Create the todos table if it does not already exist."""
+    create_users_table(conn)
     create_lists_table(conn)
     create_settings_table(conn)
     create_todos_table(conn)
+    ensure_default_user(conn)
 
 
 def create_lists_table(conn: sqlite3.Connection) -> None:
@@ -33,14 +36,21 @@ def create_lists_table(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS lists (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL
+            name TEXT NOT NULL,
+            user_id INTEGER NOT NULL DEFAULT 1
         );
     """)
     # Ensure a default list exists
     cursor = conn.execute("SELECT COUNT(*) as count FROM lists;")
     count = cursor.fetchone()["count"]
     if count == 0:
-        conn.execute("INSERT INTO lists (id, name) VALUES (1, 'Default List');")
+        conn.execute("INSERT INTO lists (id, name, user_id) VALUES (1, 'Default List', 1);")
+    # Add user_id column if upgrading
+    cursor = conn.execute("PRAGMA table_info(lists);")
+    cols = [row["name"] for row in cursor.fetchall()]
+    if "user_id" not in cols:
+        conn.execute("ALTER TABLE lists ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1;")
+        conn.execute("UPDATE lists SET user_id = 1 WHERE user_id IS NULL;")
     conn.commit()
 
 
@@ -73,6 +83,40 @@ def create_todos_table(conn: sqlite3.Connection) -> None:
     if "flags" not in cols:
         conn.execute("ALTER TABLE todos ADD COLUMN flags INTEGER NOT NULL DEFAULT 0;")
         conn.execute("UPDATE todos SET flags = 0 WHERE flags IS NULL;")
+    conn.commit()
+
+
+def create_users_table(conn: sqlite3.Connection) -> None:
+    """Create users table for simple auth."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            login_streak INTEGER NOT NULL DEFAULT 0,
+            last_login TEXT
+        );
+        """
+    )
+    # Add columns for login tracking if they are missing (migration).
+    cursor = conn.execute("PRAGMA table_info(users);")
+    cols = [row["name"] for row in cursor.fetchall()]
+    if "login_streak" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN login_streak INTEGER NOT NULL DEFAULT 0;")
+    if "last_login" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN last_login TEXT;")
+    conn.commit()
+
+
+def ensure_default_user(conn: sqlite3.Connection) -> None:
+    """Ensure a fallback default user exists for legacy data."""
+    cursor = conn.execute("SELECT id FROM users WHERE id = 1;")
+    row = cursor.fetchone()
+    if row is None:
+        conn.execute(
+            "INSERT INTO users (id, username, password_hash, login_streak) VALUES (1, 'default', '', 0);"
+        )
     conn.commit()
 
 def create_settings_table(conn: sqlite3.Connection) -> None:
@@ -116,7 +160,7 @@ def add_todo(conn: sqlite3.Connection, text: str, related_id: Optional[int] = No
 
 
 def list_todos(conn: sqlite3.Connection):
-    """Return all todos ordered by id as dictionaries."""
+    """Return all todos ordered by id as dictionaries (legacy, unscoped)."""
     cursor = conn.execute(
         "SELECT id, text, related_id, list_id, deadline, completed, flags FROM todos ORDER BY flags DESC, id ASC;"
     )
@@ -124,13 +168,49 @@ def list_todos(conn: sqlite3.Connection):
     return [dict(row) for row in rows]
 
 
-def list_todos_for_list(conn: sqlite3.Connection, list_id: int):
-    """Return todos for a specific list ordered by id."""
+def list_todos_for_list(conn: sqlite3.Connection, list_id: int, user_id: int):
+    """Return todos for a specific list ordered by id, scoped to user."""
     cursor = conn.execute(
-        "SELECT id, text, related_id, list_id, deadline, completed, flags FROM todos WHERE list_id = ? ORDER BY flags DESC, id ASC;",
-        (list_id,)
+        """
+        SELECT t.id, t.text, t.related_id, t.list_id, t.deadline, t.completed, t.flags
+        FROM todos t
+        JOIN lists l ON l.id = t.list_id
+        WHERE t.list_id = ? AND l.user_id = ?
+        ORDER BY t.flags DESC, t.id ASC;
+        """,
+        (list_id, user_id)
     )
     return [dict(row) for row in cursor.fetchall()]
+
+
+def list_todos_for_user(conn: sqlite3.Connection, user_id: int):
+    """Return all todos for a user by joining through lists."""
+    cursor = conn.execute(
+        """
+        SELECT t.id, t.text, t.related_id, t.list_id, t.deadline, t.completed, t.flags
+        FROM todos t
+        JOIN lists l ON l.id = t.list_id
+        WHERE l.user_id = ?
+        ORDER BY t.flags DESC, t.id ASC;
+        """,
+        (user_id,)
+    )
+    return [dict(row) for row in cursor.fetchall()]
+
+
+def fetch_todo_for_user(conn: sqlite3.Connection, todo_id: int, user_id: int) -> Optional[dict]:
+    """Fetch a todo only if it belongs to the given user via list ownership."""
+    cursor = conn.execute(
+        """
+        SELECT t.id, t.text, t.related_id, t.list_id, t.deadline, t.completed, t.flags
+        FROM todos t
+        JOIN lists l ON l.id = t.list_id
+        WHERE t.id = ? AND l.user_id = ?
+        """,
+        (todo_id, user_id)
+    )
+    row = cursor.fetchone()
+    return dict(row) if row else None
 
 # EDIT
 
@@ -241,9 +321,9 @@ def fetch_a_todo(db, todo_id: int):
     cursor = db.cursor()
     cursor.execute(
         """
-        SELECT *
-        FROM todos
-        WHERE id = ?
+        SELECT t.*
+        FROM todos t
+        WHERE t.id = ?
         """,
         (todo_id,)
     )
@@ -292,8 +372,8 @@ def update_settings(conn: sqlite3.Connection, theme: str, view: str, selected_li
     conn.commit()
 
 
-def list_lists(conn: sqlite3.Connection) -> list[dict]:
-    """Return all todo lists."""
+def list_lists(conn: sqlite3.Connection, user_id: int) -> list[dict]:
+    """Return all todo lists for a user."""
     cursor = conn.execute(
         """
         SELECT
@@ -302,37 +382,117 @@ def list_lists(conn: sqlite3.Connection) -> list[dict]:
           COUNT(t.id) AS task_count
         FROM lists l
         LEFT JOIN todos t ON t.list_id = l.id
+        WHERE l.user_id = ?
         GROUP BY l.id, l.name
         ORDER BY l.id ASC;
-        """
+        """,
+        (user_id,)
     )
     return [dict(row) for row in cursor.fetchall()]
 
 
-def add_list(conn: sqlite3.Connection, name: str) -> int:
-    """Create a new list and return its id."""
-    cursor = conn.execute("INSERT INTO lists (name) VALUES (?);", (name,))
+def add_list(conn: sqlite3.Connection, name: str, user_id: int) -> int:
+    """Create a new list for a user and return its id."""
+    cursor = conn.execute("INSERT INTO lists (name, user_id) VALUES (?, ?);", (name, user_id))
     conn.commit()
     return cursor.lastrowid
 
 
-def update_list_name(conn: sqlite3.Connection, list_id: int, name: str) -> bool:
-    """Rename a list."""
-    cursor = conn.execute("UPDATE lists SET name = ? WHERE id = ?;", (name, list_id))
+def update_list_name(conn: sqlite3.Connection, list_id: int, name: str, user_id: int) -> bool:
+    """Rename a list if it belongs to the user."""
+    cursor = conn.execute("UPDATE lists SET name = ? WHERE id = ? AND user_id = ?;", (name, list_id, user_id))
     conn.commit()
     return cursor.rowcount > 0
 
 
-def delete_list(conn: sqlite3.Connection, list_id: int) -> bool:
-    """Delete a list and its todos."""
+def delete_list(conn: sqlite3.Connection, list_id: int, user_id: int) -> bool:
+    """Delete a list and its todos for the user."""
     # Remove todos in the list first to avoid orphaned rows when foreign keys are off
     conn.execute("DELETE FROM todos WHERE list_id = ?;", (list_id,))
-    cursor = conn.execute("DELETE FROM lists WHERE id = ?;", (list_id,))
+    cursor = conn.execute("DELETE FROM lists WHERE id = ? AND user_id = ?;", (list_id, user_id))
     conn.commit()
     return cursor.rowcount > 0
 
 
-def fetch_list(conn: sqlite3.Connection, list_id: int) -> dict | None:
-    cursor = conn.execute("SELECT id, name FROM lists WHERE id = ?;", (list_id,))
+def fetch_list(conn: sqlite3.Connection, list_id: int, user_id: int | None = None) -> dict | None:
+    if user_id is None:
+        cursor = conn.execute("SELECT id, name, user_id FROM lists WHERE id = ?;", (list_id,))
+    else:
+        cursor = conn.execute("SELECT id, name, user_id FROM lists WHERE id = ? AND user_id = ?;", (list_id, user_id))
     row = cursor.fetchone()
     return dict(row) if row else None
+
+
+def add_user(conn: sqlite3.Connection, username: str, password_hash: str) -> int:
+    """Create a new user and return id."""
+    today = datetime.utcnow().date().isoformat()
+    cursor = conn.execute(
+        "INSERT INTO users (username, password_hash, login_streak, last_login) VALUES (?, ?, ?, ?);",
+        (username, password_hash, 1, today)
+    )
+    conn.commit()
+    return cursor.lastrowid
+
+
+def fetch_user_by_username(conn: sqlite3.Connection, username: str) -> dict | None:
+    """Fetch user record by username."""
+    cursor = conn.execute(
+        "SELECT id, username, password_hash, login_streak, last_login FROM users WHERE username = ?;",
+        (username,)
+    )
+    row = cursor.fetchone()
+    return dict(row) if row else None
+
+
+def fetch_user_by_id(conn: sqlite3.Connection, user_id: int) -> dict | None:
+    """Fetch user record by id."""
+    cursor = conn.execute(
+        "SELECT id, username, password_hash, login_streak, last_login FROM users WHERE id = ?;",
+        (user_id,)
+    )
+    row = cursor.fetchone()
+    return dict(row) if row else None
+
+
+def update_user_login_meta(conn: sqlite3.Connection, user_id: int, login_streak: int, last_login: str) -> bool:
+    """Update login streak metadata for a user."""
+    cursor = conn.execute(
+        "UPDATE users SET login_streak = ?, last_login = ? WHERE id = ?;",
+        (login_streak, last_login, user_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def ensure_user_default_list(conn: sqlite3.Connection, user_id: int) -> int:
+    """Ensure a default list exists for the given user and return its id."""
+    cursor = conn.execute("SELECT id FROM lists WHERE user_id = ? ORDER BY id ASC LIMIT 1;", (user_id,))
+    row = cursor.fetchone()
+    if row:
+        return row["id"]
+    cursor = conn.execute(
+        "INSERT INTO lists (name, user_id) VALUES (?, ?);",
+        ("Default List", user_id)
+    )
+    conn.commit()
+    return cursor.lastrowid
+
+
+def update_user_username(conn: sqlite3.Connection, user_id: int, new_username: str) -> bool:
+    """Update username for a given user."""
+    cursor = conn.execute(
+        "UPDATE users SET username = ? WHERE id = ?;",
+        (new_username, user_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def update_user_password(conn: sqlite3.Connection, user_id: int, new_password_hash: str) -> bool:
+    """Update password hash for a user."""
+    cursor = conn.execute(
+        "UPDATE users SET password_hash = ? WHERE id = ?;",
+        (new_password_hash, user_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
