@@ -141,7 +141,7 @@ const viewLabels = {
 };
 const normalizeView = (value) => (views.includes(value) ? value : "front");
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = process.env.API_BASE || "http://localhost:8000";
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   weekday: "short",
