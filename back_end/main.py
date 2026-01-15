@@ -45,6 +45,9 @@ from database import (
     update_user_ui_state,
     increment_user_goals,
     update_user_balance_and_inventory,
+    update_user_inventory_and_titles,
+    update_user_balance_inventory_titles,
+    update_user_current_title,
     fetch_user_stats,
     rank_for_level,
 )
@@ -105,6 +108,11 @@ class PurchasePayload(BaseModel):
 
 class GoalPayload(BaseModel):
     user_id: int
+
+
+class EquipTitlePayload(BaseModel):
+    user_id: int
+    title_key: str
 
 
 def normalize_username(username: str) -> str:
@@ -192,6 +200,93 @@ def parse_inventory(raw_inventory) -> list[str]:
     return []
 
 
+def parse_titles(raw_titles) -> list[str]:
+    """Normalize stored titles payload into a list of title keys."""
+    if isinstance(raw_titles, list):
+        return [str(item) for item in raw_titles if item is not None]
+    if isinstance(raw_titles, str):
+        try:
+            parsed = json.loads(raw_titles)
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed if item is not None]
+        except Exception:
+            return []
+    return []
+
+
+TITLE_CATALOG = {
+    "rookie": {"label": "Rookie", "unlock_level": 2, "price": 0, "purchasable": False},
+    "baller": {"label": "Baller", "unlock_level": 5, "price": 0, "purchasable": False},
+    "junior": {"label": "Junior", "price": 20, "purchasable": True},
+    "workaholic": {"label": "Workaholic", "price": 50, "purchasable": True},
+    "brainiac": {"label": "Brainiac", "price": 100, "purchasable": True},
+    "holy-temple": {"label": "Holy Temple", "price": 500, "purchasable": True},
+    "collector": {"label": "Collector", "unlock_inventory": 9, "price": 0, "purchasable": False},
+}
+
+THEME_LEVEL_UNLOCKS = {
+    "football": 10,
+}
+
+
+def title_inventory_key(title_key: str) -> str:
+    return f"title:{title_key}"
+
+
+def ensure_level_titles(db, user_id: int, level: int, titles: list[str] | None = None, inventory: list[str] | None = None):
+    """Auto-grant level-based titles and sync inventory."""
+    if titles is None or inventory is None:
+        user = fetch_user_by_id(db, user_id)
+        if not user:
+            return [], []
+        titles = parse_titles(user.get("titles"))
+        inventory = parse_inventory(user.get("inventory"))
+    updated = False
+    inventory_count = len(inventory)
+    for key, meta in TITLE_CATALOG.items():
+        unlock_level = meta.get("unlock_level")
+        unlock_inventory = meta.get("unlock_inventory")
+        meets_level = unlock_level and level >= unlock_level
+        meets_inventory = unlock_inventory and inventory_count >= unlock_inventory
+        if meets_level or meets_inventory:
+            if key not in titles:
+                titles.append(key)
+                updated = True
+            inv_key = title_inventory_key(key)
+            if inv_key not in inventory:
+                inventory.append(inv_key)
+                updated = True
+    if updated:
+        update_user_inventory_and_titles(db, user_id, json.dumps(inventory), json.dumps(titles))
+    return titles, inventory
+
+
+def ensure_theme_inventory(
+    db,
+    user: dict,
+    inventory: list[str] | None = None,
+    titles: list[str] | None = None
+):
+    """Ensure equipped and level-unlocked themes are present in inventory."""
+    if inventory is None:
+        inventory = parse_inventory(user.get("inventory"))
+    if titles is None:
+        titles = parse_titles(user.get("titles"))
+    updated_inventory = list(dict.fromkeys(inventory))
+    updated = False
+    theme = (user.get("theme") or "default").strip()
+    if theme and theme != "default" and theme not in updated_inventory:
+        updated_inventory.append(theme)
+        updated = True
+    level = user.get("level") or 1
+    for theme_key, unlock_level in THEME_LEVEL_UNLOCKS.items():
+        if level >= unlock_level and theme_key not in updated_inventory:
+            updated_inventory.append(theme_key)
+            updated = True
+    if updated:
+        update_user_inventory_and_titles(db, user["id"], json.dumps(updated_inventory), json.dumps(titles))
+    return updated_inventory, titles
+
 def ensure_user(user_id: int):
     if not user_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id is required")
@@ -264,6 +359,8 @@ def signup(payload: AuthPayload, db=Depends(get_db)):
             "view": "front",
             "ui_state": {},
             "inventory": [],
+            "titles": [],
+            "current_title": "",
             "xp": 0,
             "level": 1,
             "rank": "Task Trainee",
@@ -297,6 +394,8 @@ def login(payload: AuthPayload, db=Depends(get_db)):
     tasks_checked_off_today = user.get("tasks_checked_off_today") or 0
     tasks_checked_off_date = user.get("tasks_checked_off_date")
     inventory = parse_inventory(user.get("inventory"))
+    titles = parse_titles(user.get("titles"))
+    current_title = user.get("current_title") or ""
     last_login_str = user.get("last_login")
     new_streak = 1
     coins_earned = 0
@@ -356,6 +455,8 @@ def login(payload: AuthPayload, db=Depends(get_db)):
     new_total_coins = existing_coins + coins_earned
     new_best = max(best_streak, new_streak, 1)
     update_user_login_meta(db, user["id"], new_streak, new_best, today.isoformat(), new_total_coins)
+    titles, inventory = ensure_level_titles(db, user["id"], user.get("level") or 1, titles, inventory)
+    inventory, titles = ensure_theme_inventory(db, user, inventory, titles)
     return {
         "id": user["id"],
         "username": user["username"],
@@ -368,6 +469,8 @@ def login(payload: AuthPayload, db=Depends(get_db)):
         "view": user.get("view") or "front",
         "ui_state": parse_ui_state(user.get("ui_state")),
         "inventory": inventory,
+        "titles": titles,
+        "current_title": current_title,
         "xp": user.get("xp") or 0,
         "level": user.get("level") or 1,
         "rank": rank_for_level(user.get("level") or 1),
@@ -418,15 +521,49 @@ def purchase_item(payload: PurchasePayload, db=Depends(get_db)):
     item_key = (payload.item_key or "").strip()
     if not item_key:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid item key")
+    current_coins = user.get("check_coins") or 0
+
+    inventory = parse_inventory(user.get("inventory"))
+    titles = parse_titles(user.get("titles"))
+
+    if item_key.startswith("title:"):
+        title_key = item_key.split(":", 1)[1]
+        title_meta = TITLE_CATALOG.get(title_key)
+        if not title_meta or not title_meta.get("purchasable"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid title")
+        if title_key in titles:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Title already owned")
+        price = int(title_meta.get("price") or 0)
+        if price <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid price")
+        if current_coins < price:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not enough check coins")
+        new_balance = current_coins - price
+        titles.append(title_key)
+        inv_key = title_inventory_key(title_key)
+        if inv_key not in inventory:
+            inventory.append(inv_key)
+        updated = update_user_balance_inventory_titles(
+            db, user["id"], new_balance, json.dumps(inventory), json.dumps(titles)
+        )
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update balance")
+        titles, inventory = ensure_level_titles(db, user["id"], user.get("level") or 1, titles, inventory)
+        inventory, titles = ensure_theme_inventory(db, user, inventory, titles)
+        return {
+            "user_id": user["id"],
+            "check_coins": new_balance,
+            "inventory": inventory,
+            "titles": titles
+        }
+
     price = max(int(payload.price), 0)
     if price <= 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid price")
-    current_coins = user.get("check_coins") or 0
     if current_coins < price:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not enough check coins")
 
     new_balance = current_coins - price
-    inventory = parse_inventory(user.get("inventory"))
     updated_inventory = list(dict.fromkeys([*inventory, item_key]))
     inventory_json = json.dumps(updated_inventory)
 
@@ -434,11 +571,31 @@ def purchase_item(payload: PurchasePayload, db=Depends(get_db)):
     if not updated:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update balance")
 
+    titles, updated_inventory = ensure_level_titles(db, user["id"], user.get("level") or 1, titles, updated_inventory)
+    updated_inventory, titles = ensure_theme_inventory(db, user, updated_inventory, titles)
     return {
         "user_id": user["id"],
         "check_coins": new_balance,
-        "inventory": updated_inventory
+        "inventory": updated_inventory,
+        "titles": titles
     }
+
+
+@app.post("/titles/equip")
+def equip_title(payload: EquipTitlePayload, db=Depends(get_db)):
+    user = fetch_user_by_id(db, payload.user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    title_key = (payload.title_key or "").strip()
+    titles = parse_titles(user.get("titles"))
+    inventory = parse_inventory(user.get("inventory"))
+    titles, inventory = ensure_level_titles(db, user["id"], user.get("level") or 1, titles, inventory)
+    if title_key and title_key not in titles:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Title not owned")
+    updated = update_user_current_title(db, user["id"], title_key)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to equip title")
+    return {"user_id": user["id"], "current_title": title_key}
 
 
 def summarise_with_ai(todo_list):
@@ -674,7 +831,13 @@ def edit_a_todo(
             "message": f"Todo with id {id} updated successfully"
         }
         if updated_user_stats:
+            user = fetch_user_by_id(db, user_id)
+            titles, inventory = ensure_level_titles(db, user_id, updated_user_stats.get("level") or 1)
+            if user:
+                inventory, titles = ensure_theme_inventory(db, user, inventory, titles)
             # Return updated counters so the client can sync XP/level without an extra fetch.
+            updated_user_stats["titles"] = titles
+            updated_user_stats["inventory"] = inventory
             response_body["user"] = updated_user_stats
         return response_body
     except HTTPException:
@@ -910,11 +1073,14 @@ def set_settings(payload: SettingsPayload, db=Depends(get_db)):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"List with id {payload.selected_list_id} not found"
             )
-    if payload.user_id is not None and fetch_user_by_id(db, payload.user_id) is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User with id {payload.user_id} not found"
-        )
+    user = None
+    if payload.user_id is not None:
+        user = fetch_user_by_id(db, payload.user_id)
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User with id {payload.user_id} not found"
+            )
     try:
         update_settings(db, payload.theme, payload.view, payload.selected_list_id)
         if payload.user_id is not None:
@@ -922,6 +1088,11 @@ def set_settings(payload: SettingsPayload, db=Depends(get_db)):
             if payload.ui_state is not None:
                 ui_state_json = json.dumps(payload.ui_state)
                 update_user_ui_state(db, payload.user_id, ui_state_json)
+            if user:
+                user_with_theme = {**user, "theme": payload.theme}
+                inventory = parse_inventory(user.get("inventory"))
+                titles = parse_titles(user.get("titles"))
+                ensure_theme_inventory(db, user_with_theme, inventory, titles)
         return {"theme": payload.theme, "view": payload.view, "selected_list_id": payload.selected_list_id}
     except Exception as e:
         raise HTTPException(

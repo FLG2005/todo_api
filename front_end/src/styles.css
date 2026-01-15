@@ -293,6 +293,61 @@ body.theme-football .logout-panel {
   left: calc(var(--pitch-right, 95vw) - 2px);
 }
 
+.check-store-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+
+.check-store-grid .panel {
+  min-width: 0;
+}
+
+.check-store-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.check-store-grid.wide {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.shop-placeholder {
+  border: 1px dashed color-mix(in srgb, var(--accent-soft) 70%, var(--panel) 30%);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+  color: color-mix(in srgb, var(--muted) 80%, var(--panel) 20%);
+  background: color-mix(in srgb, var(--panel) 92%, var(--accent-soft) 8%);
+  opacity: 0.65;
+  font-size: 13px;
+  font-weight: 600;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+}
+
+.shop-placeholder-title {
+  font-size: 15px;
+}
+
+.shop-placeholder-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--muted) 75%, var(--panel) 25%);
+}
+
+@media (max-width: 720px) {
+  .check-store-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .football-ball {
   position: absolute;
   top: 0;
@@ -814,10 +869,22 @@ section {
   min-height: inherit;
 }
 
+section.collector-glow-gold {
+  box-shadow:
+    0 18px 36px var(--shadow),
+    0 0 0 1px var(--accent-soft),
+    0 0 70px rgba(245, 201, 72, 0.75),
+    0 0 160px rgba(245, 201, 72, 0.6);
+}
+
 section.active {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+#front.active {
+  overflow: hidden;
 }
 
 #lists {
@@ -1027,6 +1094,27 @@ section.active {
   font-size: 35px;
   color: var(--muted);
   text-align: center;
+}
+
+.hero-title-tag {
+  margin: 8px 0 0;
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel) 85%, transparent 15%);
+  border: 1px solid var(--accent-soft);
+}
+
+.hero-title-tag.glow {
+  box-shadow: 0 0 18px rgba(59, 130, 246, 0.35), 0 0 6px rgba(59, 130, 246, 0.45);
+}
+
+.hero-title-tag.glow-gold {
+  box-shadow: 0 0 18px rgba(245, 201, 72, 0.55), 0 0 6px rgba(245, 201, 72, 0.65);
 }
 
 .hero h2 {

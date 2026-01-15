@@ -105,6 +105,8 @@ def create_users_table(conn: sqlite3.Connection) -> None:
             view TEXT NOT NULL DEFAULT 'front',
             ui_state TEXT NOT NULL DEFAULT '{}',
             inventory TEXT NOT NULL DEFAULT '[]',
+            titles TEXT NOT NULL DEFAULT '[]',
+            current_title TEXT NOT NULL DEFAULT '',
             xp INTEGER NOT NULL DEFAULT 0,
             level INTEGER NOT NULL DEFAULT 1,
             rank TEXT NOT NULL DEFAULT 'Task Trainee',
@@ -140,6 +142,12 @@ def create_users_table(conn: sqlite3.Connection) -> None:
     if "inventory" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN inventory TEXT NOT NULL DEFAULT '[]';")
         conn.execute("UPDATE users SET inventory = '[]' WHERE inventory IS NULL;")
+    if "titles" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN titles TEXT NOT NULL DEFAULT '[]';")
+        conn.execute("UPDATE users SET titles = '[]' WHERE titles IS NULL;")
+    if "current_title" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN current_title TEXT NOT NULL DEFAULT '';")
+        conn.execute("UPDATE users SET current_title = '' WHERE current_title IS NULL;")
     if "xp" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN xp INTEGER NOT NULL DEFAULT 0;")
         conn.execute("UPDATE users SET xp = 0 WHERE xp IS NULL;")
@@ -488,13 +496,15 @@ def add_user(conn: sqlite3.Connection, username: str, password_hash: str) -> int
             view,
             ui_state,
             inventory,
+            titles,
+            current_title,
             xp,
             level,
             rank,
             goals
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
-        (username, password_hash, 1, 1, 0, 0, today, today, 10, "default", "front", "{}", "[]", 0, 1, "Task Trainee", 0)
+        (username, password_hash, 1, 1, 0, 0, today, today, 10, "default", "front", "{}", "[]", "[]", "", 0, 1, "Task Trainee", 0)
     )
     conn.commit()
     return cursor.lastrowid
@@ -516,6 +526,8 @@ def fetch_user_by_username(conn: sqlite3.Connection, username: str) -> dict | No
             view,
             ui_state,
             inventory,
+            titles,
+            current_title,
             xp,
             level,
             rank,
@@ -544,6 +556,8 @@ def fetch_user_by_id(conn: sqlite3.Connection, user_id: int) -> dict | None:
             view,
             ui_state,
             inventory,
+            titles,
+            current_title,
             xp,
             level,
             rank,
@@ -718,6 +732,42 @@ def update_user_balance_and_inventory(conn: sqlite3.Connection, user_id: int, ch
     return cursor.rowcount > 0
 
 
+def update_user_inventory_and_titles(conn: sqlite3.Connection, user_id: int, inventory_json: str, titles_json: str) -> bool:
+    """Update a user's inventory and titles payloads."""
+    cursor = conn.execute(
+        "UPDATE users SET inventory = ?, titles = ? WHERE id = ?;",
+        (inventory_json, titles_json, user_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def update_user_balance_inventory_titles(
+    conn: sqlite3.Connection,
+    user_id: int,
+    check_coins: int,
+    inventory_json: str,
+    titles_json: str
+) -> bool:
+    """Update balance plus inventory and titles payloads."""
+    cursor = conn.execute(
+        "UPDATE users SET check_coins = ?, inventory = ?, titles = ? WHERE id = ?;",
+        (check_coins, inventory_json, titles_json, user_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def update_user_current_title(conn: sqlite3.Connection, user_id: int, title_key: str) -> bool:
+    """Set the currently equipped title for a user."""
+    cursor = conn.execute(
+        "UPDATE users SET current_title = ? WHERE id = ?;",
+        (title_key, user_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
 def fetch_user_stats(conn: sqlite3.Connection, user_id: int) -> dict | None:
     """Lightweight fetch for frequently returned user fields including XP/level."""
     cursor = conn.execute(
@@ -734,6 +784,8 @@ def fetch_user_stats(conn: sqlite3.Connection, user_id: int) -> dict | None:
             ui_state,
             rank,
             inventory,
+            titles,
+            current_title,
             goals
         FROM users WHERE id = ?;
         """,

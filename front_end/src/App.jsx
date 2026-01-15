@@ -75,6 +75,62 @@ const themeStoreItems = [
   }
 ];
 
+const titleStoreItems = [
+  {
+    key: "rookie",
+    label: "Rookie",
+    description: "Break into the squad with your first rank-up.",
+    unlockLevel: 2,
+    purchasable: false,
+    price: 0
+  },
+  {
+    key: "baller",
+    label: "Baller",
+    description: "Prove your skills with a level 5 milestone.",
+    unlockLevel: 5,
+    purchasable: false,
+    price: 0
+  },
+  {
+    key: "junior",
+    label: "Junior",
+    description: "A fresh title for consistent check-ins.",
+    price: 20
+  },
+  {
+    key: "workaholic",
+    label: "Workaholic",
+    description: "For the always-on doers.",
+    price: 50
+  },
+  {
+    key: "brainiac",
+    label: "Brainiac",
+    description: "Smart planning meets sharp execution.",
+    price: 100
+  },
+  {
+    key: "holy-temple",
+    label: "Holy Temple",
+    description: "A legendary badge for the truly devoted.",
+    price: 500
+  },
+  {
+    key: "collector",
+    label: "Collector",
+    description: "Unlock every item.",
+    price: 0,
+    purchasable: false,
+    unlockInventory: 9
+  }
+];
+
+const titleLabelByKey = titleStoreItems.reduce((acc, item) => {
+  acc[item.key] = item.label;
+  return acc;
+}, {});
+
 const baseUnlockedThemes = Object.keys(themes).filter((key) => !themeStoreItems.some((item) => item.key === key));
 
 const views = ["front", "lists", "detail"];
@@ -144,6 +200,18 @@ const sortTodosByFlags = (items = []) =>
 const cleanAiText = (text) => (typeof text === "string" ? text.replace(/\*/g, "") : text || "");
 
 const parseInventory = (value) => (Array.isArray(value) ? value.filter(Boolean).map(String) : []);
+const parseTitles = (value) => {
+  if (Array.isArray(value)) return value.filter(Boolean).map(String);
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed.filter(Boolean).map(String) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -250,6 +318,7 @@ export default function App() {
   const [queriesSupportOpen, setQueriesSupportOpen] = useState(false);
   const [confirmLogoutOpen, setConfirmLogoutOpen] = useState(false);
   const [purchasePrompt, setPurchasePrompt] = useState(null);
+  const [titlePurchasePrompt, setTitlePurchasePrompt] = useState(null);
   const [coinsOpen, setCoinsOpen] = useState(false);
   const [checkCoins, setCheckCoins] = useState(0);
   const [coinsInfoOpen, setCoinsInfoOpen] = useState(false);
@@ -281,8 +350,9 @@ export default function App() {
   const userLevel = Number.isFinite(user?.level) ? Math.max(user.level, 1) : 1;
   const userRank = user?.rank || "Task Trainee";
   const itemsCollected = Array.isArray(user?.inventory) ? user.inventory.length : 0;
-  const totalCollectibles = 9;
+  const totalCollectibles = 10;
   const itemsCollectedLabel = `${Math.min(itemsCollected, totalCollectibles)} / ${totalCollectibles}`;
+  const userTitles = parseTitles(user?.titles);
 
   useEffect(() => {
     return () => {
@@ -305,22 +375,35 @@ export default function App() {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (parsed?.username) {
-        const bestFromStore = Number.isFinite(parsed.login_best)
-          ? parsed.login_best
-          : Number.isFinite(parsed.login_streak)
-            ? parsed.login_streak
-            : 1;
-        const tasksCheckedOff = Number.isFinite(parsed.tasks_checked_off) ? parsed.tasks_checked_off : 0;
-        const tasksCheckedOffToday = Number.isFinite(parsed.tasks_checked_off_today)
-          ? parsed.tasks_checked_off_today
-          : 0;
-        const xp = Number.isFinite(parsed.xp) ? parsed.xp : 0;
-        const level = Number.isFinite(parsed.level) ? parsed.level : 1;
-        const rank = parsed.rank || "Task Trainee";
-        setUser({ login_best: bestFromStore, tasks_checked_off: tasksCheckedOff, tasks_checked_off_today: tasksCheckedOffToday, xp, level, rank, ...parsed });
-        syncUnlockedFromInventory(parsed.inventory, parsed.id, level);
-        return;
-      }
+          const bestFromStore = Number.isFinite(parsed.login_best)
+            ? parsed.login_best
+            : Number.isFinite(parsed.login_streak)
+              ? parsed.login_streak
+              : 1;
+          const tasksCheckedOff = Number.isFinite(parsed.tasks_checked_off) ? parsed.tasks_checked_off : 0;
+          const tasksCheckedOffToday = Number.isFinite(parsed.tasks_checked_off_today)
+            ? parsed.tasks_checked_off_today
+            : 0;
+          const xp = Number.isFinite(parsed.xp) ? parsed.xp : 0;
+          const level = Number.isFinite(parsed.level) ? parsed.level : 1;
+          const rank = parsed.rank || "Task Trainee";
+          const inventory = parseInventory(parsed.inventory);
+          const titles = parseTitles(parsed.titles);
+          setUser({
+            login_best: bestFromStore,
+            tasks_checked_off: tasksCheckedOff,
+            tasks_checked_off_today: tasksCheckedOffToday,
+            xp,
+            level,
+            rank,
+            inventory,
+            titles,
+            current_title: parsed.current_title || "",
+            ...parsed
+          });
+          syncUnlockedFromInventory(inventory, parsed.id, level);
+          return;
+        }
     }
   } catch (err) {
       console.warn("Failed to load stored user", err);
@@ -338,6 +421,7 @@ export default function App() {
           body: JSON.stringify({ username: user.username, password: user.password })
         });
         const inventory = parseInventory(data.inventory);
+        const titles = parseTitles(data.titles);
         const withSecret = {
           ...data,
           login_best: Number.isFinite(data.login_best) ? data.login_best : user.login_best ?? user.login_streak ?? 1,
@@ -345,6 +429,8 @@ export default function App() {
           tasks_checked_off_today: Number.isFinite(data.tasks_checked_off_today) ? data.tasks_checked_off_today : user.tasks_checked_off_today ?? 0,
           password: user.password,
           inventory,
+          titles,
+          current_title: data.current_title || user.current_title || "",
           xp: Number.isFinite(data.xp) ? data.xp : user.xp ?? 0,
           level: Number.isFinite(data.level) ? data.level : user.level ?? 1,
           rank: data.rank || user.rank || "Task Trainee"
@@ -373,13 +459,15 @@ export default function App() {
       queriesSupportOpen ||
       checkStoreOpen ||
       purchasePrompt ||
+      titlePurchasePrompt ||
       confirmLogoutOpen ||
       lockedPromptOpen ||
       coinsInfoOpen ||
       authModalOpen ||
       !user;
+    const shouldLockScroll = modalOpen || view === "front";
 
-    if (!modalOpen) {
+    if (!shouldLockScroll) {
       document.body.style.overflow = "";
       return;
     }
@@ -399,10 +487,14 @@ export default function App() {
     queriesFaqOpen,
     queriesSupportOpen,
     checkStoreOpen,
+    purchasePrompt,
+    titlePurchasePrompt,
+    confirmLogoutOpen,
     lockedPromptOpen,
     coinsInfoOpen,
     authModalOpen,
-    user
+    user,
+    view
   ]);
 
   useEffect(() => {
@@ -426,12 +518,18 @@ export default function App() {
   }, [selectedListId, selected]);
 
   useEffect(() => {
-    loadSettings(user?.id);
+    if (!user?.id) {
+      setSettingsReady(false);
+      setTheme("default");
+      setView("front");
+      return;
+    }
+    loadSettings(user.id);
   }, [user?.id]);
 
   useEffect(() => {
-    if (!settingsReady) return;
-    saveSettings(theme, view, selectedListId, user?.id, uiState);
+    if (!settingsReady || !user?.id) return;
+    saveSettings(theme, view, selectedListId, user.id, uiState);
   }, [theme, view, selectedListId, settingsReady, user?.id, uiState]);
 
   useEffect(() => {
@@ -514,11 +612,12 @@ export default function App() {
   }, [user, userLevel]);
 
   useEffect(() => {
+    if (!settingsReady) return;
     if (!unlockedThemes.includes(theme)) {
       const fallback = baseUnlockedThemes[0] || "default";
       setTheme(fallback);
     }
-  }, [theme, unlockedThemes]);
+  }, [theme, unlockedThemes, settingsReady]);
 
   async function loadSettings(userId) {
     try {
@@ -598,7 +697,12 @@ export default function App() {
       });
       const remaining = Number.isFinite(res?.check_coins) ? res.check_coins : Math.max(checkCoins - item.price, 0);
       setCheckCoins(remaining);
-      const updatedUser = { ...user, check_coins: remaining, inventory: parseInventory(res?.inventory) };
+      const updatedUser = {
+        ...user,
+        check_coins: remaining,
+        inventory: parseInventory(res?.inventory),
+        titles: parseTitles(res?.titles ?? user?.titles)
+      };
       setUser(updatedUser);
       localStorage.setItem("authUser", JSON.stringify(updatedUser));
       syncUnlockedFromInventory(updatedUser.inventory, updatedUser.id, updatedUser.level);
@@ -606,6 +710,106 @@ export default function App() {
       showNotice(`${item.label} unlocked! Use Equip to apply.`);
     } catch (err) {
       let friendly = "Purchase failed";
+      if (err?.message) {
+        try {
+          const parsed = JSON.parse(err.message);
+          friendly = parsed?.detail || friendly;
+        } catch {
+          friendly = err.message;
+        }
+      }
+      showNotice(friendly);
+    }
+  };
+
+  const handleTitlePurchase = async () => {
+    if (!titlePurchasePrompt) return;
+    const titleKey = titlePurchasePrompt.key;
+    const item = titleStoreItems.find((entry) => entry.key === titleKey);
+    if (!item) return;
+    if (item.unlockLevel && userLevel < item.unlockLevel) {
+      showNotice(`Reach level ${item.unlockLevel} to unlock ${item.label}.`);
+      setTitlePurchasePrompt(null);
+      return;
+    }
+    if (item.purchasable === false) {
+      showNotice(`${item.label} unlocks automatically at level ${item.unlockLevel || ""}.`);
+      setTitlePurchasePrompt(null);
+      return;
+    }
+    if (!user?.id) {
+      showNotice("Please sign in to purchase titles.");
+      return;
+    }
+    if (userTitles.includes(titleKey)) {
+      showNotice(`${item.label} is already owned.`);
+      setTitlePurchasePrompt(null);
+      return;
+    }
+    if (checkCoins < item.price) {
+      showNotice("not enough check coins!");
+      setCheckStoreOpen(true);
+      setTitlePurchasePrompt(null);
+      return;
+    }
+    try {
+      const res = await api.json(api.url("/store/purchase"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: user.id, item_key: `title:${titleKey}`, price: item.price })
+      });
+      const remaining = Number.isFinite(res?.check_coins) ? res.check_coins : Math.max(checkCoins - item.price, 0);
+      const updatedTitles = parseTitles(res?.titles ?? userTitles);
+      const updatedUser = {
+        ...user,
+        check_coins: remaining,
+        inventory: parseInventory(res?.inventory),
+        titles: updatedTitles
+      };
+      setUser(updatedUser);
+      setCheckCoins(remaining);
+      localStorage.setItem("authUser", JSON.stringify(updatedUser));
+      showNotice(`${item.label} unlocked!`);
+      setTitlePurchasePrompt(null);
+    } catch (err) {
+      let friendly = "Purchase failed";
+      if (err?.message) {
+        try {
+          const parsed = JSON.parse(err.message);
+          friendly = parsed?.detail || friendly;
+        } catch {
+          friendly = err.message;
+        }
+      }
+      showNotice(friendly);
+      setTitlePurchasePrompt(null);
+    }
+  };
+
+  const handleEquipTitle = async (titleKey) => {
+    if (!user?.id) {
+      showNotice("Please sign in to equip titles.");
+      return;
+    }
+    if (!userTitles.includes(titleKey)) {
+      showNotice("Unlock this title before equipping it.");
+      return;
+    }
+    try {
+      const res = await api.json(api.url("/titles/equip"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: user.id, title_key: titleKey })
+      });
+      const updatedUser = {
+        ...user,
+        current_title: res?.current_title ?? titleKey
+      };
+      setUser(updatedUser);
+      localStorage.setItem("authUser", JSON.stringify(updatedUser));
+      showNotice("Title equipped.");
+    } catch (err) {
+      let friendly = "Unable to equip title";
       if (err?.message) {
         try {
           const parsed = JSON.parse(err.message);
@@ -643,6 +847,33 @@ export default function App() {
       return;
     }
     setPurchasePrompt({ key: themeKey, label: item.label, price: item.price });
+  };
+
+  const requestTitlePurchase = (titleKey) => {
+    const item = titleStoreItems.find((entry) => entry.key === titleKey);
+    if (!item) return;
+    if (item.unlockLevel && userLevel < item.unlockLevel) {
+      showNotice(`Reach level ${item.unlockLevel} to unlock ${item.label}.`);
+      return;
+    }
+    if (item.purchasable === false) {
+      showNotice(`${item.label} unlocks automatically at level ${item.unlockLevel || ""}.`);
+      return;
+    }
+    if (!user?.id) {
+      showNotice("Please sign in to purchase titles.");
+      return;
+    }
+    if (userTitles.includes(titleKey)) {
+      showNotice(`${item.label} is already owned.`);
+      return;
+    }
+    if (checkCoins < item.price) {
+      showNotice("not enough check coins!");
+      setCheckStoreOpen(true);
+      return;
+    }
+    setTitlePurchasePrompt({ key: titleKey, label: item.label, price: item.price });
   };
 
   const handleEquipTheme = (themeKey) => {
@@ -814,7 +1045,9 @@ export default function App() {
           xp: Number.isFinite(res.user.xp) ? res.user.xp : user.xp,
           level: Number.isFinite(res.user.level) ? res.user.level : user.level,
           rank: res.user.rank || user.rank,
-          inventory: parseInventory(res.user.inventory ?? user.inventory ?? [])
+          inventory: parseInventory(res.user.inventory ?? user.inventory ?? []),
+          titles: parseTitles(res.user.titles ?? user.titles ?? []),
+          current_title: res.user.current_title ?? user.current_title ?? ""
         };
         setUser(mergedUser);
         setCheckCoins(mergedUser.check_coins || 0);
@@ -988,6 +1221,7 @@ export default function App() {
         body: JSON.stringify({ username, password })
       });
       const inventory = parseInventory(data.inventory);
+      const titles = parseTitles(data.titles);
       const withSecret = {
         ...data,
         login_best: Number.isFinite(data.login_best) ? data.login_best : data.login_streak ?? 1,
@@ -995,6 +1229,8 @@ export default function App() {
         tasks_checked_off_today: Number.isFinite(data.tasks_checked_off_today) ? data.tasks_checked_off_today : 0,
         password,
         inventory,
+        titles,
+        current_title: data.current_title || "",
         xp: Number.isFinite(data.xp) ? data.xp : 0,
         level: Number.isFinite(data.level) ? data.level : 1,
         rank: data.rank || "Task Trainee",
@@ -1587,9 +1823,21 @@ export default function App() {
           </div>
 
           <main>
-            <section className={view === "front" ? "active" : ""} id="front">
+            <section
+              className={`${view === "front" ? "active" : ""} ${user?.current_title === "collector" ? "collector-glow-gold" : ""}`.trim()}
+              id="front"
+            >
               <div className="hero">
                 <h2 className="hero-title">Welcome, {user?.username || "friend"}!</h2>
+                {user?.current_title ? (
+                  <p
+                    className={`hero-title-tag ${
+                      user.current_title === "holy-temple" || user.current_title === "collector" ? "glow-gold" : "glow"
+                    }`.trim()}
+                  >
+                    {titleLabelByKey[user.current_title] || user.current_title}
+                  </p>
+                ) : null}
                 <p className="hero-subtitle">{heroSubtitle}</p>
                 {isFootballTheme ? <p className="hero-goals">Total goals: {user?.goals ?? 0}</p> : null}
               </div>
@@ -1899,15 +2147,36 @@ export default function App() {
         onCancel={() => setPurchasePrompt(null)}
         onConfirm={() => handleThemePurchase()}
       />
+      <ConfirmModal
+        className="confirm"
+        open={Boolean(titlePurchasePrompt)}
+        title="Confirm purchase"
+        message={
+          titlePurchasePrompt
+            ? `Buy ${titlePurchasePrompt.label} for ${titlePurchasePrompt.price} check coins?`
+            : ""
+        }
+        confirmLabel="Buy"
+        cancelLabel="Cancel"
+        destructive
+        onCancel={() => setTitlePurchasePrompt(null)}
+        onConfirm={() => handleTitlePurchase()}
+      />
       <CheckStoreModal
         open={checkStoreOpen}
         onClose={() => setCheckStoreOpen(false)}
         coins={checkCoins}
         items={themeStoreItems}
+        titleItems={titleStoreItems}
         onPurchase={requestThemePurchase}
+        onTitlePurchase={requestTitlePurchase}
         unlockedThemes={unlockedThemes}
+        ownedTitles={userTitles}
+        currentTitle={user?.current_title || ""}
+        onEquipTitle={handleEquipTitle}
         currentTheme={theme}
         userLevel={userLevel}
+        inventoryCount={Array.isArray(user?.inventory) ? user.inventory.length : 0}
         onEquip={handleEquipTheme}
       />
       <LockedItemModal
@@ -3264,11 +3533,17 @@ function CheckStoreModal({
   onClose,
   coins = 0,
   items = [],
+  titleItems = [],
   onPurchase,
+  onTitlePurchase,
   unlockedThemes = [],
+  ownedTitles = [],
+  currentTitle = "",
+  onEquipTitle,
   currentTheme,
   onEquip,
-  userLevel = 1
+  userLevel = 1,
+  inventoryCount = 0
 }) {
   if (!open) return null;
   return (
@@ -3279,7 +3554,7 @@ function CheckStoreModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="check-store-title"
-        style={{ width: "min(520px, 94vw)", padding: "26px" }}
+        style={{ width: "min(880px, 94vw)", padding: "26px" }}
       >
         <button
           onClick={onClose}
@@ -3303,10 +3578,99 @@ function CheckStoreModal({
           Check Store
         </h3>
         <p className="muted" style={{ textAlign: "center", margin: "0 0 12px" }}>
-          Spend your check coins on exclusive themes. Some unlock automatically when you reach new levels.
+          Spend your check coins on exclusive themes and titles. Some unlock automatically when you reach new levels!
         </p>
-        <div className="panel" style={{ padding: "12px", background: "var(--panel)", border: "1px solid var(--accent-soft)", display: "grid", gap: "10px" }}>
-          {items.map((item) => (
+        <div className="check-store-grid wide">
+          <div className="check-store-column">
+            <div className="panel" style={{ padding: "12px", background: "var(--panel)", border: "1px solid var(--accent-soft)", display: "grid", gap: "10px" }}>
+              <div className="muted" style={{ fontSize: "12px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                Themes
+              </div>
+              {items.map((item) => (
+                <div
+                  key={item.key}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr auto",
+                    gap: "10px",
+                    alignItems: "center",
+                    padding: "10px 12px",
+                    borderRadius: "10px",
+                    border: "1px solid color-mix(in srgb, var(--accent-soft) 60%, var(--panel) 40%)",
+                    background: "color-mix(in srgb, var(--panel) 92%, var(--accent-soft) 8%)"
+                  }}
+                >
+                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, color: "var(--text)" }}>
+                      <span>{item.label} (theme)</span>
+                      <span
+                        className="theme-chip"
+                        aria-hidden="true"
+                        style={{
+                          background: themePreviews[item.key]?.bg,
+                          borderColor: themePreviews[item.key]?.border,
+                          width: "28px",
+                          height: "28px"
+                        }}
+                      />
+                    </div>
+                    <div className="muted" style={{ fontSize: "13px" }}>{item.description}</div>
+                    {item.unlockLevel ? (
+                      <div className="muted" style={{ fontSize: "12px" }}>
+                        Unlocks at level {item.unlockLevel} {item.purchasable === false ? "(auto-unlocks)" : ""}
+                      </div>
+                    ) : null}
+                  </div>
+                  {(() => {
+                    const unlocked = unlockedThemes.includes(item.key);
+                    const lockedByLevel = item.unlockLevel && userLevel < item.unlockLevel;
+                    const purchasable = item.purchasable !== false;
+                    const buttonDisabled = currentTheme === item.key || (!unlocked && (!purchasable || lockedByLevel));
+                    let buttonLabel = `Buy for ${item.price} CC`;
+                    if (unlocked) {
+                      buttonLabel = currentTheme === item.key ? "Equipped" : "Equip";
+                    } else if (!purchasable) {
+                      buttonLabel = lockedByLevel ? `Reach level ${item.unlockLevel}` : "Unlocking...";
+                    } else if (lockedByLevel) {
+                      buttonLabel = `Reach level ${item.unlockLevel}`;
+                    }
+                    return (
+                      <button
+                        className={`button secondary ${currentTheme === item.key ? "active" : ""}`}
+                        type="button"
+                        onClick={async () => {
+                          if (unlocked) {
+                            if (currentTheme === item.key) return;
+                            if (onEquip) onEquip(item.key);
+                            return;
+                          }
+                          if (!purchasable || lockedByLevel) return;
+                          if (onPurchase) {
+                            await onPurchase(item.key);
+                          }
+                        }}
+                        style={{ minWidth: "150px" }}
+                        disabled={buttonDisabled}
+                      >
+                        {buttonLabel}
+                      </button>
+                    );
+                  })()}
+                </div>
+              ))}
+            </div>
+            <div className="shop-placeholder">
+              <div className="shop-placeholder-title">More themes coming soon!</div>
+              <div className="shop-placeholder-text">
+                We are cooking up new looks to keep your checklist fresh. Stay tuned for the next drop.
+              </div>
+            </div>
+          </div>
+          <div className="panel" style={{ padding: "12px", background: "var(--panel)", border: "1px solid var(--accent-soft)", display: "grid", gap: "10px" }}>
+          <div className="muted" style={{ fontSize: "12px", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+            Titles
+          </div>
+          {titleItems.map((item) => (
             <div
               key={item.key}
               style={{
@@ -3321,19 +3685,7 @@ function CheckStoreModal({
               }}
             >
               <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, color: "var(--text)" }}>
-                  <span>{item.label} (theme)</span>
-                  <span
-                    className="theme-chip"
-                    aria-hidden="true"
-                    style={{
-                      background: themePreviews[item.key]?.bg,
-                      borderColor: themePreviews[item.key]?.border,
-                      width: "28px",
-                      height: "28px"
-                    }}
-                  />
-                </div>
+                <div style={{ fontWeight: 700, color: "var(--text)" }}>{item.label}</div>
                 <div className="muted" style={{ fontSize: "13px" }}>{item.description}</div>
                 {item.unlockLevel ? (
                   <div className="muted" style={{ fontSize: "12px" }}>
@@ -3342,31 +3694,42 @@ function CheckStoreModal({
                 ) : null}
               </div>
               {(() => {
-                const unlocked = unlockedThemes.includes(item.key);
+                const owned = ownedTitles.includes(item.key) || currentTitle === item.key;
                 const lockedByLevel = item.unlockLevel && userLevel < item.unlockLevel;
-                const purchasable = item.purchasable !== false;
-                const buttonDisabled = currentTheme === item.key || (!unlocked && (!purchasable || lockedByLevel));
+                const meetsInventoryUnlock = item.unlockInventory && inventoryCount >= item.unlockInventory;
+                const lockedByInventory = item.unlockInventory && !meetsInventoryUnlock;
+                const effectiveOwned = owned || meetsInventoryUnlock;
+                const purchasable = item.purchasable !== false && Number.isFinite(item.price);
+                const lockedByRequirement = lockedByLevel || lockedByInventory;
+                const buttonDisabled =
+                  (effectiveOwned && currentTitle === item.key) || (!effectiveOwned && (!purchasable || lockedByRequirement));
                 let buttonLabel = `Buy for ${item.price} CC`;
-                if (unlocked) {
-                  buttonLabel = currentTheme === item.key ? "Equipped" : "Equip";
+                if (effectiveOwned) {
+                  buttonLabel = currentTitle === item.key ? "Equipped" : "Equip";
                 } else if (!purchasable) {
-                  buttonLabel = lockedByLevel ? `Reach level ${item.unlockLevel}` : "Unlocking...";
-                } else if (lockedByLevel) {
-                  buttonLabel = `Reach level ${item.unlockLevel}`;
+                  if (lockedByLevel) {
+                    buttonLabel = `Reach level ${item.unlockLevel}`;
+                  } else if (lockedByInventory) {
+                    buttonLabel = `Collect ${item.unlockInventory} items`;
+                  } else {
+                    buttonLabel = "Unlocked";
+                  }
+                } else if (lockedByRequirement) {
+                  buttonLabel = lockedByLevel ? `Reach level ${item.unlockLevel}` : `Collect ${item.unlockInventory} items`;
                 }
                 return (
                   <button
-                    className={`button secondary ${currentTheme === item.key ? "active" : ""}`}
+                    className={`button secondary ${currentTitle === item.key ? "active" : ""}`}
                     type="button"
                     onClick={async () => {
-                      if (unlocked) {
-                        if (currentTheme === item.key) return;
-                        if (onEquip) onEquip(item.key);
+                      if (effectiveOwned) {
+                        if (currentTitle === item.key) return;
+                        if (onEquipTitle) await onEquipTitle(item.key);
                         return;
                       }
-                      if (!purchasable || lockedByLevel) return;
-                      if (onPurchase) {
-                        await onPurchase(item.key);
+                      if (!purchasable || lockedByRequirement) return;
+                      if (onTitlePurchase) {
+                        await onTitlePurchase(item.key);
                       }
                     }}
                     style={{ minWidth: "150px" }}
@@ -3378,6 +3741,7 @@ function CheckStoreModal({
               })()}
             </div>
           ))}
+          </div>
         </div>
       </div>
     </div>
