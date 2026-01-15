@@ -2,7 +2,7 @@ import os
 import hashlib
 import json
 from pathlib import Path
-from fastapi import FastAPI, Depends, HTTPException, status, APIRouter
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from openai import OpenAI
@@ -131,8 +131,7 @@ def parse_ui_state(value: str | None) -> dict:
 
 id_counter = 1
 
-app = FastAPI(docs_url="/api/docs", openapi_url="/api/openapi.json")
-api = APIRouter(prefix="/api")
+app = FastAPI()
 
 origins = [
     "http://localhost:5173",
@@ -146,8 +145,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.include_router(api)
 
 
 def load_env_if_present():
@@ -339,7 +336,7 @@ def normalize_username(username: str) -> str:
     return username.strip()
 
 
-@api.post("/auth/signup")
+@app.post("/auth/signup")
 def signup(payload: AuthPayload, db=Depends(get_db)):
     username = normalize_username(payload.username)
     password = payload.password.strip()
@@ -376,7 +373,7 @@ def signup(payload: AuthPayload, db=Depends(get_db)):
         )
 
 
-@api.post("/auth/login")
+@app.post("/auth/login")
 def login(payload: AuthPayload, db=Depends(get_db)):
     username = normalize_username(payload.username)
     password = payload.password.strip()
@@ -481,7 +478,7 @@ def login(payload: AuthPayload, db=Depends(get_db)):
     }
 
 
-@api.post("/auth/update_username")
+@app.post("/auth/update_username")
 def update_username(payload: UpdateUsernamePayload, db=Depends(get_db)):
     user = fetch_user_by_id(db, payload.user_id)
     if not user:
@@ -500,7 +497,7 @@ def update_username(payload: UpdateUsernamePayload, db=Depends(get_db)):
     return {"id": payload.user_id, "username": new_username}
 
 
-@api.post("/auth/update_password")
+@app.post("/auth/update_password")
 def update_password(payload: UpdatePasswordPayload, db=Depends(get_db)):
     user = fetch_user_by_id(db, payload.user_id)
     if not user:
@@ -516,7 +513,7 @@ def update_password(payload: UpdatePasswordPayload, db=Depends(get_db)):
     return {"id": payload.user_id, "username": user["username"]}
 
 
-@api.post("/store/purchase")
+@app.post("/store/purchase")
 def purchase_item(payload: PurchasePayload, db=Depends(get_db)):
     user = fetch_user_by_id(db, payload.user_id)
     if not user:
@@ -584,7 +581,7 @@ def purchase_item(payload: PurchasePayload, db=Depends(get_db)):
     }
 
 
-@api.post("/titles/equip")
+@app.post("/titles/equip")
 def equip_title(payload: EquipTitlePayload, db=Depends(get_db)):
     user = fetch_user_by_id(db, payload.user_id)
     if not user:
@@ -659,7 +656,7 @@ def reccomend_with_ai(todo):
     return {"todos": parsed}
 
 
-@api.get('/todo_list')
+@app.get('/todo_list')
 def get_todo_list(list_id: int | None = None, user_id: int | None = None, db=Depends(get_db)):
     ensure_user(user_id)
     try:
@@ -676,14 +673,14 @@ def get_todo_list(list_id: int | None = None, user_id: int | None = None, db=Dep
         )
 
 
-@api.get('/fetch_a_todo/{id}')
+@app.get('/fetch_a_todo/{id}')
 def fetch_todo(id: int, user_id: int, db=Depends(get_db)):
     ensure_user(user_id)
     todo = ensure_user_todo(db, id, user_id)
     return todo
 
 
-@api.post('/create_a_todo')
+@app.post('/create_a_todo')
 def create_todo(
     todo_text: str,
     related_id: int = None,
@@ -734,7 +731,7 @@ def create_todo(
         )
 
 
-@api.delete('/delete_a_todo/{id}')
+@app.delete('/delete_a_todo/{id}')
 def delete_a_todo(id: int, user_id: int, db=Depends(get_db)):
     ensure_user(user_id)
     ensure_user_todo(db, id, user_id)
@@ -759,7 +756,7 @@ def delete_a_todo(id: int, user_id: int, db=Depends(get_db)):
         )
 
 
-@api.put('/edit_a_todo')
+@app.put('/edit_a_todo')
 def edit_a_todo(
     id: int,
     text: str | None = None,
@@ -852,7 +849,7 @@ def edit_a_todo(
         )
 
 
-@api.post('/summarise_todos')
+@app.post('/summarise_todos')
 def summarise(list_id: int | None = None, user_id: int | None = None, db=Depends(get_db)):
     ensure_user(user_id)
     try:
@@ -877,7 +874,7 @@ def summarise(list_id: int | None = None, user_id: int | None = None, db=Depends
         )
 
 
-@api.post('/reccomended_todos/{id}')
+@app.post('/reccomended_todos/{id}')
 def reccomend(id: int, user_id: int, db=Depends(get_db)):
     ensure_user(user_id)
     todo = ensure_user_todo(db, id, user_id)
@@ -892,7 +889,7 @@ def reccomend(id: int, user_id: int, db=Depends(get_db)):
         )
 
 
-@api.get('/lists')
+@app.get('/lists')
 def get_lists(user_id: int, db=Depends(get_db)):
     ensure_user(user_id)
     try:
@@ -904,7 +901,7 @@ def get_lists(user_id: int, db=Depends(get_db)):
         )
 
 
-@api.post('/lists')
+@app.post('/lists')
 def create_list(name: str, user_id: int, db=Depends(get_db)):
     ensure_user(user_id)
     if not name or not name.strip():
@@ -922,7 +919,7 @@ def create_list(name: str, user_id: int, db=Depends(get_db)):
         )
 
 
-@api.put('/lists/{list_id}')
+@app.put('/lists/{list_id}')
 def rename_list(list_id: int, name: str, user_id: int, db=Depends(get_db)):
     ensure_user(user_id)
     if not name or not name.strip():
@@ -949,7 +946,7 @@ def rename_list(list_id: int, name: str, user_id: int, db=Depends(get_db)):
         )
 
 
-@api.delete('/lists/{list_id}')
+@app.delete('/lists/{list_id}')
 def remove_list(list_id: int, user_id: int, db=Depends(get_db)):
     ensure_user(user_id)
     if fetch_list(db, list_id, user_id) is None:
@@ -974,7 +971,7 @@ def remove_list(list_id: int, user_id: int, db=Depends(get_db)):
         )
 
 
-@api.get('/fetch_related_todos/{id}')
+@app.get('/fetch_related_todos/{id}')
 def find_related_todos(id: int, user_id: int, db=Depends(get_db)):
     ensure_user(user_id)
     # Check if parent todo exists for user
@@ -992,7 +989,7 @@ def find_related_todos(id: int, user_id: int, db=Depends(get_db)):
         )
 
 
-@api.put('/alter_related_todos')
+@app.put('/alter_related_todos')
 def alter_related(id: int, related_id: int = None, user_id: int | None = None, db=Depends(get_db)):
     ensure_user(user_id)
     # Check if todo exists for user
@@ -1028,7 +1025,7 @@ def alter_related(id: int, related_id: int = None, user_id: int | None = None, d
         )
 
 
-@api.get('/settings')
+@app.get('/settings')
 def get_settings(user_id: int | None = None, db=Depends(get_db)):
     try:
         base_settings = fetch_settings(db)
@@ -1055,7 +1052,7 @@ def get_settings(user_id: int | None = None, db=Depends(get_db)):
         )
 
 
-@api.put('/settings')
+@app.put('/settings')
 def set_settings(payload: SettingsPayload, db=Depends(get_db)):
     allowed_themes = {"default", "cozy", "minimal", "space", "royalGarden", "beachDay", "football"}
     allowed_views = {"front", "lists", "detail"}
@@ -1104,7 +1101,7 @@ def set_settings(payload: SettingsPayload, db=Depends(get_db)):
         )
 
 
-@api.post("/goals/score")
+@app.post("/goals/score")
 def score_goal(payload: GoalPayload, db=Depends(get_db)):
     if fetch_user_by_id(db, payload.user_id) is None:
         raise HTTPException(
