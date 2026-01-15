@@ -76,6 +76,7 @@ class Todo_item(BaseModel):
 class Todo_List(BaseModel):
     todos: list[Todo_item]
 
+
 class SettingsPayload(BaseModel):
     theme: str
     view: str
@@ -99,6 +100,7 @@ class UpdatePasswordPayload(BaseModel):
     user_id: int
     current_password: str
     new_password: str
+
 
 class PurchasePayload(BaseModel):
     user_id: int
@@ -133,10 +135,7 @@ id_counter = 1
 
 app = FastAPI()
 
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
+origins = ["*"]
 
 app.add_middleware(
     CORSMiddleware,
@@ -180,6 +179,7 @@ def get_openai_client() -> OpenAI:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to initialise OpenAI client: {exc}",
         )
+
 
 def hash_password(password: str) -> str:
     """Lightweight password hashing for demo purposes."""
@@ -257,7 +257,8 @@ def ensure_level_titles(db, user_id: int, level: int, titles: list[str] | None =
                 inventory.append(inv_key)
                 updated = True
     if updated:
-        update_user_inventory_and_titles(db, user_id, json.dumps(inventory), json.dumps(titles))
+        update_user_inventory_and_titles(
+            db, user_id, json.dumps(inventory), json.dumps(titles))
     return titles, inventory
 
 
@@ -284,26 +285,31 @@ def ensure_theme_inventory(
             updated_inventory.append(theme_key)
             updated = True
     if updated:
-        update_user_inventory_and_titles(db, user["id"], json.dumps(updated_inventory), json.dumps(titles))
+        update_user_inventory_and_titles(
+            db, user["id"], json.dumps(updated_inventory), json.dumps(titles))
     return updated_inventory, titles
+
 
 def ensure_user(user_id: int):
     if not user_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id is required")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="user_id is required")
     return user_id
 
 
 def ensure_user_list(db, list_id: int, user_id: int):
     lst = fetch_list(db, list_id, user_id)
     if lst is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"List with id {list_id} not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"List with id {list_id} not found")
     return lst
 
 
 def ensure_user_todo(db, todo_id: int, user_id: int):
     todo = fetch_todo_for_user(db, todo_id, user_id)
     if todo is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Todo with id {todo_id} not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"Todo with id {todo_id} not found")
     return todo
 
 
@@ -341,10 +347,12 @@ def signup(payload: AuthPayload, db=Depends(get_db)):
     username = normalize_username(payload.username)
     password = payload.password.strip()
     if not username or not password:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username and password are required")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Username and password are required")
     existing = fetch_user_by_username(db, username)
     if existing:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Username already exists")
     try:
         user_id = add_user(db, username, hash_password(password))
         ensure_user_default_list(db, user_id)
@@ -378,7 +386,8 @@ def login(payload: AuthPayload, db=Depends(get_db)):
     username = normalize_username(payload.username)
     password = payload.password.strip()
     if not username or not password:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username and password are required")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Username and password are required")
     user = fetch_user_by_username(db, username)
     if not user or user.get("password_hash") != hash_password(password):
         raise HTTPException(
@@ -454,8 +463,10 @@ def login(payload: AuthPayload, db=Depends(get_db)):
 
     new_total_coins = existing_coins + coins_earned
     new_best = max(best_streak, new_streak, 1)
-    update_user_login_meta(db, user["id"], new_streak, new_best, today.isoformat(), new_total_coins)
-    titles, inventory = ensure_level_titles(db, user["id"], user.get("level") or 1, titles, inventory)
+    update_user_login_meta(
+        db, user["id"], new_streak, new_best, today.isoformat(), new_total_coins)
+    titles, inventory = ensure_level_titles(
+        db, user["id"], user.get("level") or 1, titles, inventory)
     inventory, titles = ensure_theme_inventory(db, user, inventory, titles)
     return {
         "id": user["id"],
@@ -482,18 +493,23 @@ def login(payload: AuthPayload, db=Depends(get_db)):
 def update_username(payload: UpdateUsernamePayload, db=Depends(get_db)):
     user = fetch_user_by_id(db, payload.user_id)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     if user.get("password_hash") != hash_password(payload.current_password.strip()):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Current password is incorrect")
     new_username = normalize_username(payload.new_username)
     if not new_username:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New username is required")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="New username is required")
     existing = fetch_user_by_username(db, new_username)
     if existing and existing.get("id") != payload.user_id:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Username already exists")
     updated = update_user_username(db, payload.user_id, new_username)
     if not updated:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update username")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update username")
     return {"id": payload.user_id, "username": new_username}
 
 
@@ -501,15 +517,19 @@ def update_username(payload: UpdateUsernamePayload, db=Depends(get_db)):
 def update_password(payload: UpdatePasswordPayload, db=Depends(get_db)):
     user = fetch_user_by_id(db, payload.user_id)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     if user.get("password_hash") != hash_password(payload.current_password.strip()):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Current password is incorrect")
     new_pw = payload.new_password.strip()
     if not new_pw:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password is required")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="New password is required")
     updated = update_user_password(db, payload.user_id, hash_password(new_pw))
     if not updated:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update password")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update password")
     return {"id": payload.user_id, "username": user["username"]}
 
 
@@ -517,10 +537,12 @@ def update_password(payload: UpdatePasswordPayload, db=Depends(get_db)):
 def purchase_item(payload: PurchasePayload, db=Depends(get_db)):
     user = fetch_user_by_id(db, payload.user_id)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     item_key = (payload.item_key or "").strip()
     if not item_key:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid item key")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid item key")
     current_coins = user.get("check_coins") or 0
 
     inventory = parse_inventory(user.get("inventory"))
@@ -530,25 +552,32 @@ def purchase_item(payload: PurchasePayload, db=Depends(get_db)):
         title_key = item_key.split(":", 1)[1]
         title_meta = TITLE_CATALOG.get(title_key)
         if not title_meta or not title_meta.get("purchasable"):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid title")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid title")
         if title_key in titles:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Title already owned")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Title already owned")
         price = int(title_meta.get("price") or 0)
         if price <= 0:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid price")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid price")
         if current_coins < price:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not enough check coins")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Not enough check coins")
         new_balance = current_coins - price
         titles.append(title_key)
         inv_key = title_inventory_key(title_key)
         if inv_key not in inventory:
             inventory.append(inv_key)
         updated = update_user_balance_inventory_titles(
-            db, user["id"], new_balance, json.dumps(inventory), json.dumps(titles)
+            db, user["id"], new_balance, json.dumps(
+                inventory), json.dumps(titles)
         )
         if not updated:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update balance")
-        titles, inventory = ensure_level_titles(db, user["id"], user.get("level") or 1, titles, inventory)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update balance")
+        titles, inventory = ensure_level_titles(
+            db, user["id"], user.get("level") or 1, titles, inventory)
         inventory, titles = ensure_theme_inventory(db, user, inventory, titles)
         return {
             "user_id": user["id"],
@@ -559,20 +588,26 @@ def purchase_item(payload: PurchasePayload, db=Depends(get_db)):
 
     price = max(int(payload.price), 0)
     if price <= 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid price")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid price")
     if current_coins < price:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not enough check coins")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Not enough check coins")
 
     new_balance = current_coins - price
     updated_inventory = list(dict.fromkeys([*inventory, item_key]))
     inventory_json = json.dumps(updated_inventory)
 
-    updated = update_user_balance_and_inventory(db, user["id"], new_balance, inventory_json)
+    updated = update_user_balance_and_inventory(
+        db, user["id"], new_balance, inventory_json)
     if not updated:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update balance")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update balance")
 
-    titles, updated_inventory = ensure_level_titles(db, user["id"], user.get("level") or 1, titles, updated_inventory)
-    updated_inventory, titles = ensure_theme_inventory(db, user, updated_inventory, titles)
+    titles, updated_inventory = ensure_level_titles(
+        db, user["id"], user.get("level") or 1, titles, updated_inventory)
+    updated_inventory, titles = ensure_theme_inventory(
+        db, user, updated_inventory, titles)
     return {
         "user_id": user["id"],
         "check_coins": new_balance,
@@ -585,16 +620,20 @@ def purchase_item(payload: PurchasePayload, db=Depends(get_db)):
 def equip_title(payload: EquipTitlePayload, db=Depends(get_db)):
     user = fetch_user_by_id(db, payload.user_id)
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     title_key = (payload.title_key or "").strip()
     titles = parse_titles(user.get("titles"))
     inventory = parse_inventory(user.get("inventory"))
-    titles, inventory = ensure_level_titles(db, user["id"], user.get("level") or 1, titles, inventory)
+    titles, inventory = ensure_level_titles(
+        db, user["id"], user.get("level") or 1, titles, inventory)
     if title_key and title_key not in titles:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Title not owned")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Title not owned")
     updated = update_user_current_title(db, user["id"], title_key)
     if not updated:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to equip title")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to equip title")
     return {"user_id": user["id"], "current_title": title_key}
 
 
@@ -604,12 +643,12 @@ def summarise_with_ai(todo_list):
 
     response = client.responses.create(
         model="gpt-4.1",
-    input=(
-        "please use my todo list: "
-        f"{todo_list} to plan my day in a friendly and concise manner, "
-        "do not bother opening up your answer by saying absolutely or so on, "
-        "just get straight to answering provide a haiku in closing"
-    )
+        input=(
+            "please use my todo list: "
+            f"{todo_list} to plan my day in a friendly and concise manner, "
+            "do not bother opening up your answer by saying absolutely or so on, "
+            "just get straight to answering provide a haiku in closing"
+        )
     )
 
     return response.output_text
@@ -642,16 +681,20 @@ def reccomend_with_ai(todo):
     def parse_recommendations(text: str) -> list[dict]:
         if not text:
             return []
-        lines = [ln.strip(" \n\r\t-*•") for ln in text.splitlines() if ln.strip()]
+        lines = [ln.strip(" \n\r\t-*•")
+                 for ln in text.splitlines() if ln.strip()]
         cleaned = [ln for ln in lines if ln]
         return [{"text": item, "related_id": todo.get("id")} for item in cleaned][:5]
 
     parsed = parse_recommendations(raw_text)
     if not parsed:
         parsed = [
-            {"text": f"Break {todo.get('text', 'this task')} into smaller steps", "related_id": todo.get("id")},
-            {"text": "Prepare any materials or info needed", "related_id": todo.get("id")},
-            {"text": "Set a time to start and a time to finish", "related_id": todo.get("id")},
+            {"text": f"Break {todo.get('text', 'this task')} into smaller steps",
+             "related_id": todo.get("id")},
+            {"text": "Prepare any materials or info needed",
+                "related_id": todo.get("id")},
+            {"text": "Set a time to start and a time to finish",
+                "related_id": todo.get("id")},
         ]
     return {"todos": parsed}
 
@@ -719,7 +762,8 @@ def create_todo(
 
     clean_deadline = parse_deadline(deadline)
     try:
-        new_todo_id = add_todo(db, todo_text, related_id, list_id, clean_deadline)
+        new_todo_id = add_todo(db, todo_text, related_id,
+                               list_id, clean_deadline)
         return {
             'success': f'created todo with id: {new_todo_id}',
             'id': new_todo_id
@@ -810,7 +854,8 @@ def edit_a_todo(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Completed tasks cannot be unchecked"
                 )
-            should_increment_task_counter = (completed is True) and (previous_completed is False)
+            should_increment_task_counter = (
+                completed is True) and (previous_completed is False)
             completed_success = update_todo_completed(db, id, completed)
             if not completed_success:
                 raise HTTPException(
@@ -818,7 +863,8 @@ def edit_a_todo(
                     detail="Failed to update completion"
                 )
             if should_increment_task_counter:
-                updated_user_stats = increment_tasks_checked_off(db, user_id, 1)
+                updated_user_stats = increment_tasks_checked_off(
+                    db, user_id, 1)
         if flags is not None:
             flags_success = update_todo_flags(db, id, flags)
             if not flags_success:
@@ -832,9 +878,11 @@ def edit_a_todo(
         }
         if updated_user_stats:
             user = fetch_user_by_id(db, user_id)
-            titles, inventory = ensure_level_titles(db, user_id, updated_user_stats.get("level") or 1)
+            titles, inventory = ensure_level_titles(
+                db, user_id, updated_user_stats.get("level") or 1)
             if user:
-                inventory, titles = ensure_theme_inventory(db, user, inventory, titles)
+                inventory, titles = ensure_theme_inventory(
+                    db, user, inventory, titles)
             # Return updated counters so the client can sync XP/level without an extra fetch.
             updated_user_stats["titles"] = titles
             updated_user_stats["inventory"] = inventory
@@ -935,7 +983,8 @@ def rename_list(list_id: int, name: str, user_id: int, db=Depends(get_db)):
     try:
         updated = update_list_name(db, list_id, name.strip(), user_id)
         if not updated:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to rename list")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to rename list")
         return {"id": list_id, "name": name.strip()}
     except HTTPException:
         raise
@@ -957,10 +1006,12 @@ def remove_list(list_id: int, user_id: int, db=Depends(get_db)):
     try:
         deleted = delete_list(db, list_id, user_id)
         if not deleted:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete list")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete list")
         current_settings = fetch_settings(db)
         if current_settings.get("selected_list_id") == list_id:
-            update_settings(db, current_settings["theme"], current_settings["view"], 1)
+            update_settings(
+                db, current_settings["theme"], current_settings["view"], 1)
         return {"deleted": True, "id": list_id}
     except HTTPException:
         raise
@@ -978,7 +1029,8 @@ def find_related_todos(id: int, user_id: int, db=Depends(get_db)):
     parent_todo = ensure_user_todo(db, id, user_id)
 
     try:
-        fetched_related = fetch_related_todos(db, related_id=id, list_id=parent_todo.get("list_id"))
+        fetched_related = fetch_related_todos(
+            db, related_id=id, list_id=parent_todo.get("list_id"))
         return {
             "related": fetched_related
         }
@@ -1032,8 +1084,10 @@ def get_settings(user_id: int | None = None, db=Depends(get_db)):
         if user_id is not None:
             user = fetch_user_by_id(db, user_id)
             if user is None:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User with id {user_id} not found")
-            theme = user.get("theme") or base_settings.get("theme") or "default"
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail=f"User with id {user_id} not found")
+            theme = user.get("theme") or base_settings.get(
+                "theme") or "default"
             view = user.get("view") or base_settings.get("view") or "front"
             ui_state = parse_ui_state(user.get("ui_state"))
             return {
@@ -1054,7 +1108,8 @@ def get_settings(user_id: int | None = None, db=Depends(get_db)):
 
 @app.put('/settings')
 def set_settings(payload: SettingsPayload, db=Depends(get_db)):
-    allowed_themes = {"default", "cozy", "minimal", "space", "royalGarden", "beachDay", "football"}
+    allowed_themes = {"default", "cozy", "minimal",
+                      "space", "royalGarden", "beachDay", "football"}
     allowed_views = {"front", "lists", "detail"}
     if payload.theme not in allowed_themes:
         raise HTTPException(
@@ -1082,9 +1137,11 @@ def set_settings(payload: SettingsPayload, db=Depends(get_db)):
                 detail=f"User with id {payload.user_id} not found"
             )
     try:
-        update_settings(db, payload.theme, payload.view, payload.selected_list_id)
+        update_settings(db, payload.theme, payload.view,
+                        payload.selected_list_id)
         if payload.user_id is not None:
-            update_user_theme_view(db, payload.user_id, payload.theme, payload.view)
+            update_user_theme_view(db, payload.user_id,
+                                   payload.theme, payload.view)
             if payload.ui_state is not None:
                 ui_state_json = json.dumps(payload.ui_state)
                 update_user_ui_state(db, payload.user_id, ui_state_json)
