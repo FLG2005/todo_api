@@ -3,6 +3,11 @@
   "version": 2,
   "buildCommand": "cd front_end && npm install && npm run build",
   "outputDirectory": "front_end/dist",
+  "functions": {
+    "api/**/*.py": {
+      "runtime": "python3.11"
+    }
+  },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" }
   ]
