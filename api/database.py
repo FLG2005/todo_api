@@ -2,7 +2,7 @@ import os
 from typing import Optional
 from datetime import datetime
 
-from libsql_client import create_client
+from libsql_experimental import create_client
 
 
 class TursoCursor:
