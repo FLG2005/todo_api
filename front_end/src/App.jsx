@@ -141,12 +141,7 @@ const viewLabels = {
 };
 const normalizeView = (value) => (views.includes(value) ? value : "front");
 
-const API_BASE = (() => {
-  const configured = import.meta.env.VITE_API_BASE || import.meta.env.API_BASE;
-  if (configured) return configured;
-  if (import.meta.env.DEV) return "http://localhost:8000";
-  return "https://todo-api-nine-kappa.vercel.app";
-})();
+const API_BASE = "/api";
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   weekday: "short",
