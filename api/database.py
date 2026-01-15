@@ -49,6 +49,8 @@ def _rows_to_dicts(cursor) -> list[dict]:
         return []
     columns = [col[0] for col in cursor.description]
     rows = cursor.fetchall()
+    if not rows:
+        return []
     return [dict(zip(columns, row)) for row in rows]
 
 
