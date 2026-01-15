@@ -145,7 +145,7 @@ const API_BASE = (() => {
   const configured = import.meta.env.VITE_API_BASE || import.meta.env.API_BASE;
   if (configured) return configured;
   if (import.meta.env.DEV) return "http://localhost:8000";
-  return "/api";
+  return "https://todo-api-nine-kappa.vercel.app";
 })();
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
