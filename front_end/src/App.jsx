@@ -83,6 +83,7 @@ const viewLabels = {
   lists: "My Lists",
   detail: "Individual List"
 };
+const normalizeView = (value) => (views.includes(value) ? value : "front");
 
 const API_BASE = "http://localhost:8000";
 
@@ -218,6 +219,27 @@ export default function App() {
   const [closeSettingsTimeout, setCloseSettingsTimeout] = useState(null);
   const [settingsThemeOpen, setSettingsThemeOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [goalExplosions, setGoalExplosions] = useState([]);
+  const ballRef = useRef(null);
+  const ballRafRef = useRef(null);
+  const ballStateRef = useRef({ x: 0, y: 0, vx: 4, vy: 2 });
+  const ballBoundsRef = useRef({ minX: 0, maxX: 0, minY: 0, maxY: 0, size: 36 });
+  const ballLastTimeRef = useRef(0);
+  const goalExplosionIdRef = useRef(0);
+  const goalLineContactRef = useRef({ left: false, right: false });
+  const userRef = useRef(null);
+  const uiState = useMemo(
+    () => ({
+      view,
+      selectedListId,
+      menuOpen,
+      showSettings,
+      createOpen,
+      settingsThemeOpen
+    }),
+    [view, selectedListId, menuOpen, showSettings, createOpen, settingsThemeOpen]
+  );
+
   const [tasksCollapsed, setTasksCollapsed] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [closeHelpTimeout, setCloseHelpTimeout] = useState(null);
@@ -243,6 +265,10 @@ export default function App() {
   const [notice, setNotice] = useState(null);
   const noticeTimeoutRef = useRef(null);
   const [unlockedThemes, setUnlockedThemes] = useState(baseUnlockedThemes);
+  
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
   const loginStreak = Number.isFinite(user?.login_streak) ? user.login_streak : 0;
   const loginBest = Number.isFinite(user?.login_best)
     ? user.login_best
@@ -405,8 +431,8 @@ export default function App() {
 
   useEffect(() => {
     if (!settingsReady) return;
-    saveSettings(theme, view, selectedListId, user?.id);
-  }, [theme, view, selectedListId, settingsReady, user?.id]);
+    saveSettings(theme, view, selectedListId, user?.id, uiState);
+  }, [theme, view, selectedListId, settingsReady, user?.id, uiState]);
 
   useEffect(() => {
     if (selectedListId) {
@@ -501,7 +527,7 @@ export default function App() {
       const path = params.toString() ? `/settings?${params.toString()}` : "/settings";
       const data = await api.json(api.url(path));
       setTheme(data.theme || "default");
-      setView(data.view || "front");
+      setView(normalizeView(data.view));
       if (data.selected_list_id) {
         setSelectedListId(data.selected_list_id);
       }
@@ -513,12 +539,18 @@ export default function App() {
     }
   }
 
-  async function saveSettings(nextTheme, nextView, nextSelectedListId, userId) {
+  async function saveSettings(nextTheme, nextView, nextSelectedListId, userId, nextUiState) {
     try {
       await api.json(api.url("/settings"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ theme: nextTheme, view: nextView, selected_list_id: nextSelectedListId, user_id: userId })
+        body: JSON.stringify({
+          theme: nextTheme,
+          view: nextView,
+          selected_list_id: nextSelectedListId,
+          user_id: userId,
+          ui_state: nextUiState
+        })
       });
     } catch (err) {
       console.error("Failed to save settings", err);
@@ -526,7 +558,7 @@ export default function App() {
   }
 
   const changeView = (nextView) => {
-    setView(nextView);
+    setView(normalizeView(nextView));
   };
 
   const handleThemePurchase = async () => {
@@ -965,7 +997,8 @@ export default function App() {
         inventory,
         xp: Number.isFinite(data.xp) ? data.xp : 0,
         level: Number.isFinite(data.level) ? data.level : 1,
-        rank: data.rank || "Task Trainee"
+        rank: data.rank || "Task Trainee",
+        goals: Number.isFinite(data.goals) ? data.goals : 0
       };
       setUser(withSecret);
       setCheckCoins(withSecret.check_coins || 0);
@@ -1006,6 +1039,241 @@ export default function App() {
     setAuthModalOpen(true);
   };
 
+  const parseCssValue = (value, axis) => {
+    const trimmed = value.trim();
+    if (trimmed.endsWith("vw")) {
+      return (parseFloat(trimmed) / 100) * window.innerWidth;
+    }
+    if (trimmed.endsWith("vh")) {
+      return (parseFloat(trimmed) / 100) * window.innerHeight;
+    }
+    if (trimmed.endsWith("px")) {
+      return parseFloat(trimmed);
+    }
+    const fallback = parseFloat(trimmed);
+    return Number.isNaN(fallback)
+      ? axis === "x"
+        ? window.innerWidth * 0.05
+        : window.innerHeight * 0.05
+      : fallback;
+  };
+
+  const updateBallBounds = () => {
+    const styles = getComputedStyle(document.body);
+    const left = parseCssValue(styles.getPropertyValue("--pitch-left"), "x");
+    const right = parseCssValue(styles.getPropertyValue("--pitch-right"), "x");
+    const top = parseCssValue(styles.getPropertyValue("--pitch-top"), "y");
+    const bottom = parseCssValue(styles.getPropertyValue("--pitch-bottom"), "y");
+    const size = parseCssValue(styles.getPropertyValue("--ball-size"), "x") || 36;
+    const pitchWidth = Math.max(right - left, 1);
+    const pitchHeight = Math.max(bottom - top, 1);
+    const goalWidthRatio = 7.32 / 68;
+    const goalHalfHeight = (pitchHeight * goalWidthRatio) / 2;
+    const goalCenterY = top + pitchHeight / 2;
+    const mapX = (value) => left + ((value - 50) / 900) * pitchWidth;
+    const mapY = (value) => top + ((value - 30) / 540) * pitchHeight;
+    ballBoundsRef.current = {
+      minX: left,
+      maxX: Math.max(left, right - size),
+      minY: top,
+      maxY: Math.max(top, bottom - size),
+      size,
+      goalMouth: {
+        y1: goalCenterY - goalHalfHeight,
+        y2: goalCenterY + goalHalfHeight
+      },
+      goalBoxes: {
+        left: {
+          x1: mapX(50),
+          x2: mapX(110),
+          y1: mapY(230),
+          y2: mapY(370)
+        },
+        right: {
+          x1: mapX(890),
+          x2: mapX(950),
+          y1: mapY(230),
+          y2: mapY(370)
+        }
+      }
+    };
+  };
+
+  const boostBall = () => {
+    const speed = 14;
+    const angle = Math.random() * Math.PI * 2;
+    const minAxis = 1.8;
+    const nextVx = Math.cos(angle) * speed;
+    const nextVy = Math.sin(angle) * speed;
+    ballStateRef.current.vx = Math.abs(nextVx) < minAxis ? Math.sign(nextVx || 1) * minAxis : nextVx;
+    ballStateRef.current.vy = Math.abs(nextVy) < minAxis ? Math.sign(nextVy || 1) * minAxis : nextVy;
+  };
+
+  const triggerGoalExplosion = (x, y) => {
+    const id = goalExplosionIdRef.current++;
+    setGoalExplosions((prev) => [...prev, { id, x, y }]);
+    setTimeout(() => {
+      setGoalExplosions((prev) => prev.filter((entry) => entry.id !== id));
+    }, 900);
+  };
+
+  const recordGoal = async () => {
+    const currentUser = userRef.current;
+    if (!currentUser?.id) return;
+    try {
+      const data = await api.json(api.url("/goals/score"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: currentUser.id })
+      });
+      if (typeof data?.goals === "number") {
+        const updatedUser = { ...currentUser, goals: data.goals };
+        setUser(updatedUser);
+        localStorage.setItem("authUser", JSON.stringify(updatedUser));
+      }
+    } catch (err) {
+      console.error("Failed to record goal", err);
+    }
+  };
+
+  useEffect(() => {
+    if (theme !== "football") {
+      if (ballRafRef.current) cancelAnimationFrame(ballRafRef.current);
+      ballRafRef.current = null;
+      return;
+    }
+
+    const ball = ballRef.current;
+    if (!ball) return;
+
+    updateBallBounds();
+    const bounds = ballBoundsRef.current;
+    ballStateRef.current = {
+      x: (bounds.minX + bounds.maxX) / 2,
+      y: (bounds.minY + bounds.maxY) / 2,
+      vx: ballStateRef.current.vx || 4,
+      vy: ballStateRef.current.vy || 2
+    };
+    ballLastTimeRef.current = 0;
+
+    const animate = (time) => {
+      if (!ballRef.current) return;
+      if (!ballLastTimeRef.current) ballLastTimeRef.current = time;
+      const dt = Math.min(2, (time - ballLastTimeRef.current) / 16.67);
+      ballLastTimeRef.current = time;
+
+      const state = ballStateRef.current;
+      const prevX = state.x;
+      const prevY = state.y;
+      const boundsNow = ballBoundsRef.current;
+      const friction = 0.99;
+      const minAxisSpeed = 1.05;
+      const minSpeed = 1.8;
+      const maxSpeed = 14;
+      const frictionFactor = Math.pow(friction, dt);
+
+      state.vx *= frictionFactor;
+      state.vy *= frictionFactor;
+      if (Math.abs(state.vx) < minAxisSpeed) state.vx = Math.sign(state.vx || 1) * minAxisSpeed;
+      if (Math.abs(state.vy) < minAxisSpeed) state.vy = Math.sign(state.vy || 1) * minAxisSpeed;
+      const speed = Math.hypot(state.vx, state.vy);
+      if (speed < minSpeed) {
+        const scale = minSpeed / (speed || minSpeed);
+        state.vx *= scale;
+        state.vy *= scale;
+      } else if (speed > maxSpeed) {
+        const scale = maxSpeed / speed;
+        state.vx *= scale;
+        state.vy *= scale;
+      }
+      state.x += state.vx * dt;
+      state.y += state.vy * dt;
+
+      const maybeTriggerGoal = (hitX, hitY) => {
+        triggerGoalExplosion(hitX, hitY);
+        recordGoal();
+      };
+
+      if (state.x <= boundsNow.minX) {
+        state.x = boundsNow.minX;
+        state.vx = Math.abs(state.vx);
+        if (boundsNow.goalMouth) {
+          const centerY = state.y + boundsNow.size / 2;
+          if (centerY >= boundsNow.goalMouth.y1 && centerY <= boundsNow.goalMouth.y2) {
+            if (prevX > boundsNow.minX) {
+              maybeTriggerGoal(boundsNow.minX, centerY);
+            }
+          }
+        }
+      }
+      if (state.x >= boundsNow.maxX) {
+        state.x = boundsNow.maxX;
+        state.vx = -Math.abs(state.vx);
+        if (boundsNow.goalMouth) {
+          const centerY = state.y + boundsNow.size / 2;
+          if (centerY >= boundsNow.goalMouth.y1 && centerY <= boundsNow.goalMouth.y2) {
+            if (prevX < boundsNow.maxX) {
+              maybeTriggerGoal(boundsNow.maxX + boundsNow.size, centerY);
+            }
+          }
+        }
+      }
+      if (state.y <= boundsNow.minY) {
+        state.y = boundsNow.minY;
+        state.vy = Math.abs(state.vy);
+      }
+      if (state.y >= boundsNow.maxY) {
+        state.y = boundsNow.maxY;
+        state.vy = -Math.abs(state.vy);
+      }
+
+      const radius = boundsNow.size / 2;
+      const nextCx = state.x + radius;
+      const nextCy = state.y + radius;
+      if (boundsNow.goalMouth) {
+        const centerY = nextCy;
+        const withinGoalMouth = centerY >= boundsNow.goalMouth.y1 && centerY <= boundsNow.goalMouth.y2;
+        const leftLineX = boundsNow.minX;
+        const rightLineX = boundsNow.maxX + boundsNow.size;
+        const boundaryTolerance = 0.5;
+        const touchesLeftLine = Math.abs(state.x - leftLineX) <= boundaryTolerance;
+        const touchesRightLine = Math.abs(state.x + boundsNow.size - rightLineX) <= boundaryTolerance;
+        const leftContact = withinGoalMouth && touchesLeftLine;
+        const rightContact = withinGoalMouth && touchesRightLine;
+        if (leftContact && !goalLineContactRef.current.left) {
+          goalLineContactRef.current.left = true;
+          maybeTriggerGoal(leftLineX, centerY);
+        } else if (!leftContact) {
+          goalLineContactRef.current.left = false;
+        }
+        if (rightContact && !goalLineContactRef.current.right) {
+          goalLineContactRef.current.right = true;
+          maybeTriggerGoal(rightLineX, centerY);
+        } else if (!rightContact) {
+          goalLineContactRef.current.right = false;
+        }
+      }
+      ballRef.current.style.transform = `translate(${state.x}px, ${state.y}px)`;
+      ballRafRef.current = requestAnimationFrame(animate);
+    };
+
+    ballRafRef.current = requestAnimationFrame(animate);
+
+    const handleResize = () => {
+      updateBallBounds();
+      const boundsNext = ballBoundsRef.current;
+      ballStateRef.current.x = Math.min(Math.max(ballStateRef.current.x, boundsNext.minX), boundsNext.maxX);
+      ballStateRef.current.y = Math.min(Math.max(ballStateRef.current.y, boundsNext.minY), boundsNext.maxY);
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      if (ballRafRef.current) cancelAnimationFrame(ballRafRef.current);
+      ballRafRef.current = null;
+    };
+  }, [theme]);
+
   if (!user) {
     return (
       <ErrorBoundary>
@@ -1031,6 +1299,28 @@ export default function App() {
 
   return (
     <ErrorBoundary>
+      {theme === "football" ? (
+        <div className="football-ball-layer" aria-hidden="true">
+          {goalExplosions.map((explosion) => (
+            <div
+              key={explosion.id}
+              className="goal-explosion"
+              style={{ left: explosion.x, top: explosion.y }}
+            >
+              Goal!!!
+            </div>
+          ))}
+          <button
+            type="button"
+            className="football-ball"
+            ref={ballRef}
+            onClick={boostBall}
+            aria-label="Boost soccer ball"
+          >
+            <PiSoccerBall className="football-ball-icon" />
+          </button>
+        </div>
+      ) : null}
       <div className="app">
       {notice && (
         <div className="toast" role="status">
@@ -1311,6 +1601,7 @@ export default function App() {
               <div className="hero">
                 <h2 className="hero-title">Welcome, {user?.username || "friend"}!</h2>
                 <p className="hero-subtitle">{heroSubtitle}</p>
+                {isFootballTheme ? <p className="hero-goals">Total goals: {user?.goals ?? 0}</p> : null}
               </div>
               <div className="tasks-summary">
                 <div className="panel tasks-card">
@@ -2994,7 +3285,7 @@ function CheckStoreModal({
     <div className="modal">
       <div className="modal-backdrop" onClick={onClose} aria-hidden="true"></div>
       <div
-        className="modal-content"
+        className="modal-content check-store-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="check-store-title"

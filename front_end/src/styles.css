@@ -229,11 +229,17 @@ body.theme-football .dropdown-theme-select,
 body.theme-football .dropdown-theme-toggle,
 body.theme-football .theme-dropdown,
 body.theme-football .nav-button,
+body.theme-football .check-store-modal,
 body.theme-football .panel {
   border-color: #0b150b;
   box-shadow:
     0 10px 20px rgba(12, 29, 16, 0.14),
     0 0 0 2px rgba(255, 255, 255, 0.7);
+}
+
+body.theme-football .check-store-modal {
+  outline: 2px solid #0b150b;
+  outline-offset: 2px;
 }
 
 body.theme-football .button.danger {
@@ -260,6 +266,71 @@ body.theme-football .logout-panel {
   flex-direction: column;
   align-items: center;
   text-align: center;
+}
+
+.football-ball-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+.football-ball {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--ball-size);
+  height: var(--ball-size);
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 0;
+}
+
+.football-ball-icon {
+  width: 100%;
+  height: 100%;
+  color: #f8f8f8;
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.25));
+  animation: football-spin 2.4s linear infinite;
+}
+
+.goal-explosion {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #ffd95a;
+  text-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.35),
+    0 0 10px rgba(255, 217, 90, 0.5);
+  animation: goal-pop 0.9s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes goal-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.6);
+  }
+  30% {
+    opacity: 1;
+    transform: translate(-50%, -55%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -80%) scale(1.1);
+  }
+}
+
+@keyframes football-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .menu-dropdown,
@@ -316,6 +387,7 @@ body.theme-royal-garden .help-dropdown .nav-button {
 }
 
 body.theme-royal-garden .shop-button {
+  color: #0f261c;
   border-color: #f2cb5b;
   box-shadow:
     0 12px 24px rgba(0, 0, 0, 0.35),
@@ -2262,6 +2334,11 @@ body.theme-football {
   --outline-secondary: #0b150b;
   --glow: rgba(47, 143, 58, 0.22);
   --shadow: rgba(12, 29, 16, 0.2);
+  --pitch-left: 5vw;
+  --pitch-right: 95vw;
+  --pitch-top: 5vh;
+  --pitch-bottom: 95vh;
+  --ball-size: 36px;
   --bg-layer:
     url("data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20viewBox%3D%270%200%201000%20600%27%20preserveAspectRatio%3D%27none%27%3E%3Cg%20fill%3D%27none%27%20stroke%3D%27rgba%28255%2C255%2C255%2C0.75%29%27%20stroke-width%3D%272%27%3E%3Crect%20x%3D%2750%27%20y%3D%2730%27%20width%3D%27900%27%20height%3D%27540%27/%3E%3Cline%20x1%3D%27500%27%20y1%3D%2730%27%20x2%3D%27500%27%20y2%3D%27570%27/%3E%3Ccircle%20cx%3D%27500%27%20cy%3D%27300%27%20r%3D%2790%27/%3E%3Crect%20x%3D%2750%27%20y%3D%27150%27%20width%3D%27150%27%20height%3D%27300%27/%3E%3Crect%20x%3D%27800%27%20y%3D%27150%27%20width%3D%27150%27%20height%3D%27300%27/%3E%3Crect%20x%3D%2750%27%20y%3D%27230%27%20width%3D%2760%27%20height%3D%27140%27/%3E%3Crect%20x%3D%27890%27%20y%3D%27230%27%20width%3D%2760%27%20height%3D%27140%27/%3E%3Cpath%20d%3D%27M200%20255%20A45%2045%200%200%201%20200%20345%27/%3E%3Cpath%20d%3D%27M800%20255%20A45%2045%200%200%200%20800%20345%27/%3E%3C/g%3E%3Cg%20fill%3D%27rgba%28255%2C255%2C255%2C0.75%29%27%3E%3Ccircle%20cx%3D%27500%27%20cy%3D%27300%27%20r%3D%272%27/%3E%3Ccircle%20cx%3D%27150%27%20cy%3D%27300%27%20r%3D%272%27/%3E%3Ccircle%20cx%3D%27850%27%20cy%3D%27300%27%20r%3D%272%27/%3E%3C/g%3E%3C/svg%3E") center/cover no-repeat,
     radial-gradient(circle at 18% 20%, rgba(24, 82, 26, 0.2), transparent 45%),

@@ -103,10 +103,12 @@ def create_users_table(conn: sqlite3.Connection) -> None:
             check_coins INTEGER NOT NULL DEFAULT 0,
             theme TEXT NOT NULL DEFAULT 'default',
             view TEXT NOT NULL DEFAULT 'front',
+            ui_state TEXT NOT NULL DEFAULT '{}',
             inventory TEXT NOT NULL DEFAULT '[]',
             xp INTEGER NOT NULL DEFAULT 0,
             level INTEGER NOT NULL DEFAULT 1,
-            rank TEXT NOT NULL DEFAULT 'Task Trainee'
+            rank TEXT NOT NULL DEFAULT 'Task Trainee',
+            goals INTEGER NOT NULL DEFAULT 0
         );
         """
     )
@@ -132,6 +134,9 @@ def create_users_table(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'default';")
     if "view" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN view TEXT NOT NULL DEFAULT 'front';")
+    if "ui_state" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN ui_state TEXT NOT NULL DEFAULT '{}';")
+        conn.execute("UPDATE users SET ui_state = '{}' WHERE ui_state IS NULL;")
     if "inventory" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN inventory TEXT NOT NULL DEFAULT '[]';")
         conn.execute("UPDATE users SET inventory = '[]' WHERE inventory IS NULL;")
@@ -144,6 +149,9 @@ def create_users_table(conn: sqlite3.Connection) -> None:
     if "rank" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN rank TEXT NOT NULL DEFAULT 'Task Trainee';")
         conn.execute("UPDATE users SET rank = 'Task Trainee' WHERE rank IS NULL;")
+    if "goals" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN goals INTEGER NOT NULL DEFAULT 0;")
+        conn.execute("UPDATE users SET goals = 0 WHERE goals IS NULL;")
     conn.commit()
 
 
@@ -478,13 +486,15 @@ def add_user(conn: sqlite3.Connection, username: str, password_hash: str) -> int
             check_coins,
             theme,
             view,
+            ui_state,
             inventory,
             xp,
             level,
-            rank
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            rank,
+            goals
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
-        (username, password_hash, 1, 1, 0, 0, today, today, 10, "default", "front", "[]", 0, 1, "Task Trainee")
+        (username, password_hash, 1, 1, 0, 0, today, today, 10, "default", "front", "{}", "[]", 0, 1, "Task Trainee", 0)
     )
     conn.commit()
     return cursor.lastrowid
@@ -504,10 +514,12 @@ def fetch_user_by_username(conn: sqlite3.Connection, username: str) -> dict | No
             check_coins,
             theme,
             view,
+            ui_state,
             inventory,
             xp,
             level,
-            rank
+            rank,
+            goals
         FROM users WHERE username = ?;
         """,
         (username,)
@@ -530,10 +542,12 @@ def fetch_user_by_id(conn: sqlite3.Connection, user_id: int) -> dict | None:
             check_coins,
             theme,
             view,
+            ui_state,
             inventory,
             xp,
             level,
-            rank
+            rank,
+            goals
         FROM users WHERE id = ?;
         """,
         (user_id,)
@@ -672,6 +686,28 @@ def update_user_theme_view(conn: sqlite3.Connection, user_id: int, theme: str, v
     return cursor.rowcount > 0
 
 
+def update_user_ui_state(conn: sqlite3.Connection, user_id: int, ui_state: str) -> bool:
+    """Persist a user's UI state payload."""
+    cursor = conn.execute(
+        "UPDATE users SET ui_state = ? WHERE id = ?;",
+        (ui_state, user_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def increment_user_goals(conn: sqlite3.Connection, user_id: int, amount: int = 1) -> int | None:
+    """Increment a user's goal count and return the updated total."""
+    cursor = conn.execute("SELECT goals FROM users WHERE id = ?;", (user_id,))
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    new_goals = (row["goals"] or 0) + max(amount, 0)
+    conn.execute("UPDATE users SET goals = ? WHERE id = ?;", (new_goals, user_id))
+    conn.commit()
+    return new_goals
+
+
 def update_user_balance_and_inventory(conn: sqlite3.Connection, user_id: int, check_coins: int, inventory_json: str) -> bool:
     """Update a user's coin balance and stored inventory payload."""
     cursor = conn.execute(
@@ -695,8 +731,10 @@ def fetch_user_stats(conn: sqlite3.Connection, user_id: int) -> dict | None:
             level,
             theme,
             view,
+            ui_state,
             rank,
-            inventory
+            inventory,
+            goals
         FROM users WHERE id = ?;
         """,
         (user_id,)

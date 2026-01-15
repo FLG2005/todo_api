@@ -42,6 +42,8 @@ from database import (
     update_user_login_meta,
     increment_tasks_checked_off,
     update_user_theme_view,
+    update_user_ui_state,
+    increment_user_goals,
     update_user_balance_and_inventory,
     fetch_user_stats,
     rank_for_level,
@@ -76,6 +78,7 @@ class SettingsPayload(BaseModel):
     view: str
     selected_list_id: int | None = None
     user_id: int | None = None
+    ui_state: dict | None = None
 
 
 class AuthPayload(BaseModel):
@@ -100,8 +103,22 @@ class PurchasePayload(BaseModel):
     price: int
 
 
+class GoalPayload(BaseModel):
+    user_id: int
+
+
 def normalize_username(username: str) -> str:
     return username.strip()
+
+
+def parse_ui_state(value: str | None) -> dict:
+    if not value:
+        return {}
+    try:
+        data = json.loads(value)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        return {}
 
 
 id_counter = 1
@@ -245,10 +262,12 @@ def signup(payload: AuthPayload, db=Depends(get_db)):
             "check_coins": 10,
             "theme": "default",
             "view": "front",
+            "ui_state": {},
             "inventory": [],
             "xp": 0,
             "level": 1,
-            "rank": "Task Trainee"
+            "rank": "Task Trainee",
+            "goals": 0
         }
     except Exception as exc:
         raise HTTPException(
@@ -347,10 +366,12 @@ def login(payload: AuthPayload, db=Depends(get_db)):
         "check_coins": new_total_coins,
         "theme": user.get("theme") or "default",
         "view": user.get("view") or "front",
+        "ui_state": parse_ui_state(user.get("ui_state")),
         "inventory": inventory,
         "xp": user.get("xp") or 0,
         "level": user.get("level") or 1,
-        "rank": rank_for_level(user.get("level") or 1)
+        "rank": rank_for_level(user.get("level") or 1),
+        "goals": user.get("goals") or 0
     }
 
 
@@ -851,7 +872,13 @@ def get_settings(user_id: int | None = None, db=Depends(get_db)):
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User with id {user_id} not found")
             theme = user.get("theme") or base_settings.get("theme") or "default"
             view = user.get("view") or base_settings.get("view") or "front"
-            return {"theme": theme, "view": view, "selected_list_id": base_settings.get("selected_list_id")}
+            ui_state = parse_ui_state(user.get("ui_state"))
+            return {
+                "theme": theme,
+                "view": view,
+                "ui_state": ui_state,
+                "selected_list_id": base_settings.get("selected_list_id")
+            }
         return base_settings
     except HTTPException:
         raise
@@ -892,21 +919,28 @@ def set_settings(payload: SettingsPayload, db=Depends(get_db)):
         update_settings(db, payload.theme, payload.view, payload.selected_list_id)
         if payload.user_id is not None:
             update_user_theme_view(db, payload.user_id, payload.theme, payload.view)
+            if payload.ui_state is not None:
+                ui_state_json = json.dumps(payload.ui_state)
+                update_user_ui_state(db, payload.user_id, ui_state_json)
         return {"theme": payload.theme, "view": payload.view, "selected_list_id": payload.selected_list_id}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save settings: {str(e)}"
         )
+
+
+@app.post("/goals/score")
+def score_goal(payload: GoalPayload, db=Depends(get_db)):
+    if fetch_user_by_id(db, payload.user_id) is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"List with id {payload.selected_list_id} not found"
+            detail=f"User with id {payload.user_id} not found"
         )
-    try:
-        update_settings(db, payload.theme, payload.view, payload.selected_list_id)
-        return {"theme": payload.theme, "view": payload.view, "selected_list_id": payload.selected_list_id}
-    except Exception as e:
+    updated = increment_user_goals(db, payload.user_id, 1)
+    if updated is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to save settings: {str(e)}"
+            detail="Failed to update goals"
         )
+    return {"goals": updated}
