@@ -95,8 +95,22 @@ def create_users_table(conn: sqlite3.Connection) -> None:
             username TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
             login_streak INTEGER NOT NULL DEFAULT 0,
+            login_best INTEGER NOT NULL DEFAULT 1,
+            tasks_checked_off INTEGER NOT NULL DEFAULT 0,
+            tasks_checked_off_today INTEGER NOT NULL DEFAULT 0,
+            tasks_checked_off_date TEXT,
             last_login TEXT,
-            check_coins INTEGER NOT NULL DEFAULT 0
+            check_coins INTEGER NOT NULL DEFAULT 0,
+            theme TEXT NOT NULL DEFAULT 'default',
+            view TEXT NOT NULL DEFAULT 'front',
+            ui_state TEXT NOT NULL DEFAULT '{}',
+            inventory TEXT NOT NULL DEFAULT '[]',
+            titles TEXT NOT NULL DEFAULT '[]',
+            current_title TEXT NOT NULL DEFAULT '',
+            xp INTEGER NOT NULL DEFAULT 0,
+            level INTEGER NOT NULL DEFAULT 1,
+            rank TEXT NOT NULL DEFAULT 'Task Trainee',
+            goals INTEGER NOT NULL DEFAULT 0
         );
         """
     )
@@ -105,10 +119,47 @@ def create_users_table(conn: sqlite3.Connection) -> None:
     cols = [row["name"] for row in cursor.fetchall()]
     if "login_streak" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN login_streak INTEGER NOT NULL DEFAULT 0;")
+    if "login_best" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN login_best INTEGER NOT NULL DEFAULT 1;")
+        conn.execute("UPDATE users SET login_best = CASE WHEN login_streak > 1 THEN login_streak ELSE 1 END;")
+    if "tasks_checked_off" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN tasks_checked_off INTEGER NOT NULL DEFAULT 0;")
+    if "tasks_checked_off_today" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN tasks_checked_off_today INTEGER NOT NULL DEFAULT 0;")
+    if "tasks_checked_off_date" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN tasks_checked_off_date TEXT;")
     if "last_login" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN last_login TEXT;")
     if "check_coins" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN check_coins INTEGER NOT NULL DEFAULT 0;")
+    if "theme" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'default';")
+    if "view" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN view TEXT NOT NULL DEFAULT 'front';")
+    if "ui_state" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN ui_state TEXT NOT NULL DEFAULT '{}';")
+        conn.execute("UPDATE users SET ui_state = '{}' WHERE ui_state IS NULL;")
+    if "inventory" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN inventory TEXT NOT NULL DEFAULT '[]';")
+        conn.execute("UPDATE users SET inventory = '[]' WHERE inventory IS NULL;")
+    if "titles" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN titles TEXT NOT NULL DEFAULT '[]';")
+        conn.execute("UPDATE users SET titles = '[]' WHERE titles IS NULL;")
+    if "current_title" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN current_title TEXT NOT NULL DEFAULT '';")
+        conn.execute("UPDATE users SET current_title = '' WHERE current_title IS NULL;")
+    if "xp" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN xp INTEGER NOT NULL DEFAULT 0;")
+        conn.execute("UPDATE users SET xp = 0 WHERE xp IS NULL;")
+    if "level" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN level INTEGER NOT NULL DEFAULT 1;")
+        conn.execute("UPDATE users SET level = 1 WHERE level IS NULL;")
+    if "rank" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN rank TEXT NOT NULL DEFAULT 'Task Trainee';")
+        conn.execute("UPDATE users SET rank = 'Task Trainee' WHERE rank IS NULL;")
+    if "goals" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN goals INTEGER NOT NULL DEFAULT 0;")
+        conn.execute("UPDATE users SET goals = 0 WHERE goals IS NULL;")
     conn.commit()
 
 
@@ -118,7 +169,7 @@ def ensure_default_user(conn: sqlite3.Connection) -> None:
     row = cursor.fetchone()
     if row is None:
         conn.execute(
-            "INSERT INTO users (id, username, password_hash, login_streak, check_coins) VALUES (1, 'default', '', 0, 0);"
+            "INSERT INTO users (id, username, password_hash, login_streak, login_best, tasks_checked_off, check_coins) VALUES (1, 'default', '', 0, 1, 0, 0);"
         )
     conn.commit()
 
@@ -430,8 +481,30 @@ def add_user(conn: sqlite3.Connection, username: str, password_hash: str) -> int
     """Create a new user and return id."""
     today = datetime.utcnow().date().isoformat()
     cursor = conn.execute(
-        "INSERT INTO users (username, password_hash, login_streak, last_login, check_coins) VALUES (?, ?, ?, ?, ?);",
-        (username, password_hash, 1, today, 10)
+        """
+        INSERT INTO users (
+            username,
+            password_hash,
+            login_streak,
+            login_best,
+            tasks_checked_off,
+            tasks_checked_off_today,
+            tasks_checked_off_date,
+            last_login,
+            check_coins,
+            theme,
+            view,
+            ui_state,
+            inventory,
+            titles,
+            current_title,
+            xp,
+            level,
+            rank,
+            goals
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """,
+        (username, password_hash, 1, 1, 0, 0, today, today, 10, "default", "front", "{}", "[]", "[]", "", 0, 1, "Task Trainee", 0)
     )
     conn.commit()
     return cursor.lastrowid
@@ -440,7 +513,27 @@ def add_user(conn: sqlite3.Connection, username: str, password_hash: str) -> int
 def fetch_user_by_username(conn: sqlite3.Connection, username: str) -> dict | None:
     """Fetch user record by username."""
     cursor = conn.execute(
-        "SELECT id, username, password_hash, login_streak, last_login, check_coins FROM users WHERE username = ?;",
+        """
+        SELECT
+            id, username, password_hash,
+            login_streak, login_best,
+            tasks_checked_off,
+            tasks_checked_off_today,
+            tasks_checked_off_date,
+            last_login,
+            check_coins,
+            theme,
+            view,
+            ui_state,
+            inventory,
+            titles,
+            current_title,
+            xp,
+            level,
+            rank,
+            goals
+        FROM users WHERE username = ?;
+        """,
         (username,)
     )
     row = cursor.fetchone()
@@ -450,21 +543,117 @@ def fetch_user_by_username(conn: sqlite3.Connection, username: str) -> dict | No
 def fetch_user_by_id(conn: sqlite3.Connection, user_id: int) -> dict | None:
     """Fetch user record by id."""
     cursor = conn.execute(
-        "SELECT id, username, password_hash, login_streak, last_login, check_coins FROM users WHERE id = ?;",
+        """
+        SELECT
+            id, username, password_hash,
+            login_streak, login_best,
+            tasks_checked_off,
+            tasks_checked_off_today,
+            tasks_checked_off_date,
+            last_login,
+            check_coins,
+            theme,
+            view,
+            ui_state,
+            inventory,
+            titles,
+            current_title,
+            xp,
+            level,
+            rank,
+            goals
+        FROM users WHERE id = ?;
+        """,
         (user_id,)
     )
     row = cursor.fetchone()
     return dict(row) if row else None
 
 
-def update_user_login_meta(conn: sqlite3.Connection, user_id: int, login_streak: int, last_login: str, check_coins: int) -> bool:
+def update_user_login_meta(conn: sqlite3.Connection, user_id: int, login_streak: int, login_best: int, last_login: str, check_coins: int) -> bool:
     """Update login streak metadata for a user."""
     cursor = conn.execute(
-        "UPDATE users SET login_streak = ?, last_login = ?, check_coins = ? WHERE id = ?;",
-        (login_streak, last_login, check_coins, user_id)
+        "UPDATE users SET login_streak = ?, login_best = ?, last_login = ?, check_coins = ? WHERE id = ?;",
+        (login_streak, login_best, last_login, check_coins, user_id)
     )
     conn.commit()
     return cursor.rowcount > 0
+
+
+def rank_for_level(level: int) -> str:
+    """Map a numeric level to a rank label."""
+    if level is None:
+        return "Task Trainee"
+    if level <= 2:
+        return "Task Trainee"
+    if level <= 6:
+        return "Daily Doer"
+    if level <= 10:
+        return "Reliable Resolver"
+    return "Elite Executor"
+
+
+def increment_tasks_checked_off(conn: sqlite3.Connection, user_id: int, amount: int = 1):
+    """Increment task counters and award XP; returns updated stats dict or False when user missing."""
+    cursor = conn.execute(
+        """
+        SELECT
+            tasks_checked_off,
+            tasks_checked_off_today,
+            tasks_checked_off_date,
+            check_coins,
+            xp,
+            level
+        FROM users WHERE id = ?;
+        """,
+        (user_id,)
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return False
+
+    today_str = datetime.utcnow().date().isoformat()
+    last_date = row["tasks_checked_off_date"]
+    reset_today = last_date != today_str
+
+    base_amount = max(amount, 0)
+    new_tasks_checked_off_today = (0 if reset_today else (row["tasks_checked_off_today"] or 0)) + base_amount
+    new_tasks_checked_off = (row["tasks_checked_off"] or 0) + base_amount
+
+    # XP logic: each completed task grants 10% toward next level (10 tasks per level).
+    current_xp = row["xp"] or 0
+    current_level = row["level"] or 1
+    gained_xp = base_amount * 10
+    total_xp = current_xp + gained_xp
+    levels_gained = total_xp // 100
+    next_level = current_level + levels_gained
+    next_xp = total_xp % 100
+    next_rank = rank_for_level(next_level)
+
+    conn.execute(
+        """
+        UPDATE users
+        SET
+            tasks_checked_off = ?,
+            tasks_checked_off_today = ?,
+            tasks_checked_off_date = ?,
+            xp = ?,
+            level = ?,
+            rank = ?
+        WHERE id = ?;
+        """,
+        (new_tasks_checked_off, new_tasks_checked_off_today, today_str, next_xp, next_level, next_rank, user_id)
+    )
+    conn.commit()
+    return {
+        "tasks_checked_off": new_tasks_checked_off,
+        "tasks_checked_off_today": new_tasks_checked_off_today,
+        "tasks_checked_off_date": today_str,
+        "check_coins": row["check_coins"] or 0,
+        "xp": next_xp,
+        "level": next_level,
+        "rank": next_rank
+    }
 
 
 def ensure_user_default_list(conn: sqlite3.Connection, user_id: int) -> int:
@@ -475,7 +664,7 @@ def ensure_user_default_list(conn: sqlite3.Connection, user_id: int) -> int:
         return row["id"]
     cursor = conn.execute(
         "INSERT INTO lists (name, user_id) VALUES (?, ?);",
-        ("Default List", user_id)
+        ("unnamed list", user_id)
     )
     conn.commit()
     return cursor.lastrowid
@@ -499,3 +688,108 @@ def update_user_password(conn: sqlite3.Connection, user_id: int, new_password_ha
     )
     conn.commit()
     return cursor.rowcount > 0
+
+
+def update_user_theme_view(conn: sqlite3.Connection, user_id: int, theme: str, view: str) -> bool:
+    """Persist a user's last selected theme and view."""
+    cursor = conn.execute(
+        "UPDATE users SET theme = ?, view = ? WHERE id = ?;",
+        (theme, view, user_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def update_user_ui_state(conn: sqlite3.Connection, user_id: int, ui_state: str) -> bool:
+    """Persist a user's UI state payload."""
+    cursor = conn.execute(
+        "UPDATE users SET ui_state = ? WHERE id = ?;",
+        (ui_state, user_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def increment_user_goals(conn: sqlite3.Connection, user_id: int, amount: int = 1) -> int | None:
+    """Increment a user's goal count and return the updated total."""
+    cursor = conn.execute("SELECT goals FROM users WHERE id = ?;", (user_id,))
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    new_goals = (row["goals"] or 0) + max(amount, 0)
+    conn.execute("UPDATE users SET goals = ? WHERE id = ?;", (new_goals, user_id))
+    conn.commit()
+    return new_goals
+
+
+def update_user_balance_and_inventory(conn: sqlite3.Connection, user_id: int, check_coins: int, inventory_json: str) -> bool:
+    """Update a user's coin balance and stored inventory payload."""
+    cursor = conn.execute(
+        "UPDATE users SET check_coins = ?, inventory = ? WHERE id = ?;",
+        (check_coins, inventory_json, user_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def update_user_inventory_and_titles(conn: sqlite3.Connection, user_id: int, inventory_json: str, titles_json: str) -> bool:
+    """Update a user's inventory and titles payloads."""
+    cursor = conn.execute(
+        "UPDATE users SET inventory = ?, titles = ? WHERE id = ?;",
+        (inventory_json, titles_json, user_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def update_user_balance_inventory_titles(
+    conn: sqlite3.Connection,
+    user_id: int,
+    check_coins: int,
+    inventory_json: str,
+    titles_json: str
+) -> bool:
+    """Update balance plus inventory and titles payloads."""
+    cursor = conn.execute(
+        "UPDATE users SET check_coins = ?, inventory = ?, titles = ? WHERE id = ?;",
+        (check_coins, inventory_json, titles_json, user_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def update_user_current_title(conn: sqlite3.Connection, user_id: int, title_key: str) -> bool:
+    """Set the currently equipped title for a user."""
+    cursor = conn.execute(
+        "UPDATE users SET current_title = ? WHERE id = ?;",
+        (title_key, user_id)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def fetch_user_stats(conn: sqlite3.Connection, user_id: int) -> dict | None:
+    """Lightweight fetch for frequently returned user fields including XP/level."""
+    cursor = conn.execute(
+        """
+        SELECT
+            id, username,
+            tasks_checked_off,
+            tasks_checked_off_today,
+            check_coins,
+            xp,
+            level,
+            theme,
+            view,
+            ui_state,
+            rank,
+            inventory,
+            titles,
+            current_title,
+            goals
+        FROM users WHERE id = ?;
+        """,
+        (user_id,)
+    )
+    row = cursor.fetchone()
+    return dict(row) if row else None

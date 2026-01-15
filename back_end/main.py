@@ -1,5 +1,6 @@
 import os
 import hashlib
+import json
 from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,6 +40,16 @@ from database import (
     update_user_username,
     update_user_password,
     update_user_login_meta,
+    increment_tasks_checked_off,
+    update_user_theme_view,
+    update_user_ui_state,
+    increment_user_goals,
+    update_user_balance_and_inventory,
+    update_user_inventory_and_titles,
+    update_user_balance_inventory_titles,
+    update_user_current_title,
+    fetch_user_stats,
+    rank_for_level,
 )
 
 
@@ -69,6 +80,8 @@ class SettingsPayload(BaseModel):
     theme: str
     view: str
     selected_list_id: int | None = None
+    user_id: int | None = None
+    ui_state: dict | None = None
 
 
 class AuthPayload(BaseModel):
@@ -87,9 +100,33 @@ class UpdatePasswordPayload(BaseModel):
     current_password: str
     new_password: str
 
+class PurchasePayload(BaseModel):
+    user_id: int
+    item_key: str
+    price: int
+
+
+class GoalPayload(BaseModel):
+    user_id: int
+
+
+class EquipTitlePayload(BaseModel):
+    user_id: int
+    title_key: str
+
 
 def normalize_username(username: str) -> str:
     return username.strip()
+
+
+def parse_ui_state(value: str | None) -> dict:
+    if not value:
+        return {}
+    try:
+        data = json.loads(value)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        return {}
 
 
 id_counter = 1
@@ -148,6 +185,107 @@ def hash_password(password: str) -> str:
     """Lightweight password hashing for demo purposes."""
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
+
+def parse_inventory(raw_inventory) -> list[str]:
+    """Normalize stored inventory payload into a list of item keys."""
+    if isinstance(raw_inventory, list):
+        return [str(item) for item in raw_inventory if item is not None]
+    if isinstance(raw_inventory, str):
+        try:
+            parsed = json.loads(raw_inventory)
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed if item is not None]
+        except Exception:
+            return []
+    return []
+
+
+def parse_titles(raw_titles) -> list[str]:
+    """Normalize stored titles payload into a list of title keys."""
+    if isinstance(raw_titles, list):
+        return [str(item) for item in raw_titles if item is not None]
+    if isinstance(raw_titles, str):
+        try:
+            parsed = json.loads(raw_titles)
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed if item is not None]
+        except Exception:
+            return []
+    return []
+
+
+TITLE_CATALOG = {
+    "rookie": {"label": "Rookie", "unlock_level": 2, "price": 0, "purchasable": False},
+    "baller": {"label": "Baller", "unlock_level": 5, "price": 0, "purchasable": False},
+    "junior": {"label": "Junior", "price": 20, "purchasable": True},
+    "workaholic": {"label": "Workaholic", "price": 50, "purchasable": True},
+    "brainiac": {"label": "Brainiac", "price": 100, "purchasable": True},
+    "holy-temple": {"label": "Holy Temple", "price": 500, "purchasable": True},
+    "collector": {"label": "Collector", "unlock_inventory": 9, "price": 0, "purchasable": False},
+}
+
+THEME_LEVEL_UNLOCKS = {
+    "football": 10,
+}
+
+
+def title_inventory_key(title_key: str) -> str:
+    return f"title:{title_key}"
+
+
+def ensure_level_titles(db, user_id: int, level: int, titles: list[str] | None = None, inventory: list[str] | None = None):
+    """Auto-grant level-based titles and sync inventory."""
+    if titles is None or inventory is None:
+        user = fetch_user_by_id(db, user_id)
+        if not user:
+            return [], []
+        titles = parse_titles(user.get("titles"))
+        inventory = parse_inventory(user.get("inventory"))
+    updated = False
+    inventory_count = len(inventory)
+    for key, meta in TITLE_CATALOG.items():
+        unlock_level = meta.get("unlock_level")
+        unlock_inventory = meta.get("unlock_inventory")
+        meets_level = unlock_level and level >= unlock_level
+        meets_inventory = unlock_inventory and inventory_count >= unlock_inventory
+        if meets_level or meets_inventory:
+            if key not in titles:
+                titles.append(key)
+                updated = True
+            inv_key = title_inventory_key(key)
+            if inv_key not in inventory:
+                inventory.append(inv_key)
+                updated = True
+    if updated:
+        update_user_inventory_and_titles(db, user_id, json.dumps(inventory), json.dumps(titles))
+    return titles, inventory
+
+
+def ensure_theme_inventory(
+    db,
+    user: dict,
+    inventory: list[str] | None = None,
+    titles: list[str] | None = None
+):
+    """Ensure equipped and level-unlocked themes are present in inventory."""
+    if inventory is None:
+        inventory = parse_inventory(user.get("inventory"))
+    if titles is None:
+        titles = parse_titles(user.get("titles"))
+    updated_inventory = list(dict.fromkeys(inventory))
+    updated = False
+    theme = (user.get("theme") or "default").strip()
+    if theme and theme != "default" and theme not in updated_inventory:
+        updated_inventory.append(theme)
+        updated = True
+    level = user.get("level") or 1
+    for theme_key, unlock_level in THEME_LEVEL_UNLOCKS.items():
+        if level >= unlock_level and theme_key not in updated_inventory:
+            updated_inventory.append(theme_key)
+            updated = True
+    if updated:
+        update_user_inventory_and_titles(db, user["id"], json.dumps(updated_inventory), json.dumps(titles))
+    return updated_inventory, titles
 
 def ensure_user(user_id: int):
     if not user_id:
@@ -210,7 +348,24 @@ def signup(payload: AuthPayload, db=Depends(get_db)):
     try:
         user_id = add_user(db, username, hash_password(password))
         ensure_user_default_list(db, user_id)
-        return {"id": user_id, "username": username, "login_streak": 1, "check_coins": 10}
+        return {
+            "id": user_id,
+            "username": username,
+            "login_streak": 1,
+            "login_best": 1,
+            "tasks_checked_off": 0,
+            "check_coins": 10,
+            "theme": "default",
+            "view": "front",
+            "ui_state": {},
+            "inventory": [],
+            "titles": [],
+            "current_title": "",
+            "xp": 0,
+            "level": 1,
+            "rank": "Task Trainee",
+            "goals": 0
+        }
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -234,46 +389,93 @@ def login(payload: AuthPayload, db=Depends(get_db)):
     today = datetime.utcnow().date()
     existing_streak = user.get("login_streak") or 0
     existing_coins = user.get("check_coins") or 0
+    best_streak = user.get("login_best") or 1
+    tasks_checked_off = user.get("tasks_checked_off") or 0
+    tasks_checked_off_today = user.get("tasks_checked_off_today") or 0
+    tasks_checked_off_date = user.get("tasks_checked_off_date")
+    inventory = parse_inventory(user.get("inventory"))
+    titles = parse_titles(user.get("titles"))
+    current_title = user.get("current_title") or ""
     last_login_str = user.get("last_login")
     new_streak = 1
     coins_earned = 0
     streak_increment = 0
-    # Backfill coins if streak already reflects more days than coins awarded (e.g., manual edits)
-    def minimum_coins_for_streak(streak: int) -> int:
-        base = max(streak, 0) * 10
-        if streak >= 5:
-            base += 20
-        if streak >= 10:
-            base += 50
-        return base
-    expected_coins_for_existing_streak = minimum_coins_for_streak(existing_streak)
-    if existing_coins < expected_coins_for_existing_streak:
-        coins_earned += expected_coins_for_existing_streak - existing_coins
+
+    def coins_for_increment(prev_streak: int, next_streak: int) -> int:
+        """Reward 10 coins per streak day gained plus milestone bonuses."""
+        if next_streak <= prev_streak:
+            return 0
+        earned = (next_streak - prev_streak) * 10
+        thresholds = (
+            (5, 20),
+            (10, 50),
+            (20, 100),
+            (50, 300),
+        )
+        for threshold, bonus in thresholds:
+            if next_streak >= threshold and prev_streak < threshold:
+                earned += bonus
+        return earned
+
     if last_login_str:
         try:
             last_login_date = datetime.fromisoformat(last_login_str).date()
         except Exception:
             last_login_date = None
         if last_login_date:
-            delta_days = (today - last_login_date).days
+            delta_days = max((today - last_login_date).days, 0)
             if delta_days == 0:
                 new_streak = max(existing_streak, 1)
+                coins_earned = 0
             elif delta_days == 1:
                 new_streak = (existing_streak or 0) + 1
+                coins_earned = coins_for_increment(existing_streak, new_streak)
             else:
-                # Missed at least one full day: reset the streak to 1 for today.
+                # Missed at least one full day: reset the streak to 1 for today and award the daily login coins.
                 new_streak = 1
-    # award coins for streak increment
-    streak_increment = max(new_streak - existing_streak, 0)
-    if streak_increment:
-        coins_earned += streak_increment * 10
-        if new_streak >= 5 and existing_streak < 5:
-            coins_earned += 20
-        if new_streak >= 10 and existing_streak < 10:
-            coins_earned += 50
+                coins_earned = 10
+        else:
+            # Unparseable last_login: treat as a fresh login day.
+            new_streak = 1
+            coins_earned = 10
+    else:
+        # First recorded login: grant daily coins.
+        new_streak = max(existing_streak, 1)
+        coins_earned = 10 if existing_streak == 0 else 0
+
+    # Reset daily tasks if the date rolled over
+    if tasks_checked_off_date != today.isoformat():
+        tasks_checked_off_today = 0
+        db.execute(
+            "UPDATE users SET tasks_checked_off_today = 0, tasks_checked_off_date = ? WHERE id = ?;",
+            (today.isoformat(), user["id"])
+        )
+        db.commit()
+
     new_total_coins = existing_coins + coins_earned
-    update_user_login_meta(db, user["id"], new_streak, today.isoformat(), new_total_coins)
-    return {"id": user["id"], "username": user["username"], "login_streak": new_streak, "check_coins": new_total_coins}
+    new_best = max(best_streak, new_streak, 1)
+    update_user_login_meta(db, user["id"], new_streak, new_best, today.isoformat(), new_total_coins)
+    titles, inventory = ensure_level_titles(db, user["id"], user.get("level") or 1, titles, inventory)
+    inventory, titles = ensure_theme_inventory(db, user, inventory, titles)
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "login_streak": new_streak,
+        "login_best": new_best,
+        "tasks_checked_off": tasks_checked_off,
+        "tasks_checked_off_today": tasks_checked_off_today,
+        "check_coins": new_total_coins,
+        "theme": user.get("theme") or "default",
+        "view": user.get("view") or "front",
+        "ui_state": parse_ui_state(user.get("ui_state")),
+        "inventory": inventory,
+        "titles": titles,
+        "current_title": current_title,
+        "xp": user.get("xp") or 0,
+        "level": user.get("level") or 1,
+        "rank": rank_for_level(user.get("level") or 1),
+        "goals": user.get("goals") or 0
+    }
 
 
 @app.post("/auth/update_username")
@@ -309,6 +511,91 @@ def update_password(payload: UpdatePasswordPayload, db=Depends(get_db)):
     if not updated:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update password")
     return {"id": payload.user_id, "username": user["username"]}
+
+
+@app.post("/store/purchase")
+def purchase_item(payload: PurchasePayload, db=Depends(get_db)):
+    user = fetch_user_by_id(db, payload.user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    item_key = (payload.item_key or "").strip()
+    if not item_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid item key")
+    current_coins = user.get("check_coins") or 0
+
+    inventory = parse_inventory(user.get("inventory"))
+    titles = parse_titles(user.get("titles"))
+
+    if item_key.startswith("title:"):
+        title_key = item_key.split(":", 1)[1]
+        title_meta = TITLE_CATALOG.get(title_key)
+        if not title_meta or not title_meta.get("purchasable"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid title")
+        if title_key in titles:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Title already owned")
+        price = int(title_meta.get("price") or 0)
+        if price <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid price")
+        if current_coins < price:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not enough check coins")
+        new_balance = current_coins - price
+        titles.append(title_key)
+        inv_key = title_inventory_key(title_key)
+        if inv_key not in inventory:
+            inventory.append(inv_key)
+        updated = update_user_balance_inventory_titles(
+            db, user["id"], new_balance, json.dumps(inventory), json.dumps(titles)
+        )
+        if not updated:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update balance")
+        titles, inventory = ensure_level_titles(db, user["id"], user.get("level") or 1, titles, inventory)
+        inventory, titles = ensure_theme_inventory(db, user, inventory, titles)
+        return {
+            "user_id": user["id"],
+            "check_coins": new_balance,
+            "inventory": inventory,
+            "titles": titles
+        }
+
+    price = max(int(payload.price), 0)
+    if price <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid price")
+    if current_coins < price:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not enough check coins")
+
+    new_balance = current_coins - price
+    updated_inventory = list(dict.fromkeys([*inventory, item_key]))
+    inventory_json = json.dumps(updated_inventory)
+
+    updated = update_user_balance_and_inventory(db, user["id"], new_balance, inventory_json)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update balance")
+
+    titles, updated_inventory = ensure_level_titles(db, user["id"], user.get("level") or 1, titles, updated_inventory)
+    updated_inventory, titles = ensure_theme_inventory(db, user, updated_inventory, titles)
+    return {
+        "user_id": user["id"],
+        "check_coins": new_balance,
+        "inventory": updated_inventory,
+        "titles": titles
+    }
+
+
+@app.post("/titles/equip")
+def equip_title(payload: EquipTitlePayload, db=Depends(get_db)):
+    user = fetch_user_by_id(db, payload.user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    title_key = (payload.title_key or "").strip()
+    titles = parse_titles(user.get("titles"))
+    inventory = parse_inventory(user.get("inventory"))
+    titles, inventory = ensure_level_titles(db, user["id"], user.get("level") or 1, titles, inventory)
+    if title_key and title_key not in titles:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Title not owned")
+    updated = update_user_current_title(db, user["id"], title_key)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to equip title")
+    return {"user_id": user["id"], "current_title": title_key}
 
 
 def summarise_with_ai(todo_list):
@@ -498,7 +785,9 @@ def edit_a_todo(
     clean_deadline = parse_deadline(deadline)
 
     # Check if todo exists for user
-    ensure_user_todo(db, id, user_id)
+    existing_todo = ensure_user_todo(db, id, user_id)
+    previous_completed = bool(existing_todo.get("completed"))
+    updated_user_stats = None
 
     try:
         if text is not None:
@@ -516,12 +805,20 @@ def edit_a_todo(
                     detail="Failed to update deadline"
                 )
         if completed is not None:
+            if previous_completed and completed is False:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Completed tasks cannot be unchecked"
+                )
+            should_increment_task_counter = (completed is True) and (previous_completed is False)
             completed_success = update_todo_completed(db, id, completed)
             if not completed_success:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to update completion"
                 )
+            if should_increment_task_counter:
+                updated_user_stats = increment_tasks_checked_off(db, user_id, 1)
         if flags is not None:
             flags_success = update_todo_flags(db, id, flags)
             if not flags_success:
@@ -529,10 +826,20 @@ def edit_a_todo(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to update flags"
                 )
-        return {
+        response_body = {
             "edited": True,
             "message": f"Todo with id {id} updated successfully"
         }
+        if updated_user_stats:
+            user = fetch_user_by_id(db, user_id)
+            titles, inventory = ensure_level_titles(db, user_id, updated_user_stats.get("level") or 1)
+            if user:
+                inventory, titles = ensure_theme_inventory(db, user, inventory, titles)
+            # Return updated counters so the client can sync XP/level without an extra fetch.
+            updated_user_stats["titles"] = titles
+            updated_user_stats["inventory"] = inventory
+            response_body["user"] = updated_user_stats
+        return response_body
     except HTTPException:
         raise
     except Exception as e:
@@ -719,9 +1026,25 @@ def alter_related(id: int, related_id: int = None, user_id: int | None = None, d
 
 
 @app.get('/settings')
-def get_settings(db=Depends(get_db)):
+def get_settings(user_id: int | None = None, db=Depends(get_db)):
     try:
-        return fetch_settings(db)
+        base_settings = fetch_settings(db)
+        if user_id is not None:
+            user = fetch_user_by_id(db, user_id)
+            if user is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User with id {user_id} not found")
+            theme = user.get("theme") or base_settings.get("theme") or "default"
+            view = user.get("view") or base_settings.get("view") or "front"
+            ui_state = parse_ui_state(user.get("ui_state"))
+            return {
+                "theme": theme,
+                "view": view,
+                "ui_state": ui_state,
+                "selected_list_id": base_settings.get("selected_list_id")
+            }
+        return base_settings
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -731,7 +1054,7 @@ def get_settings(db=Depends(get_db)):
 
 @app.put('/settings')
 def set_settings(payload: SettingsPayload, db=Depends(get_db)):
-    allowed_themes = {"default", "cozy", "minimal", "space"}
+    allowed_themes = {"default", "cozy", "minimal", "space", "royalGarden", "beachDay", "football"}
     allowed_views = {"front", "lists", "detail"}
     if payload.theme not in allowed_themes:
         raise HTTPException(
@@ -743,16 +1066,52 @@ def set_settings(payload: SettingsPayload, db=Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid view"
         )
-    if payload.selected_list_id is not None and fetch_list(db, payload.selected_list_id) is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"List with id {payload.selected_list_id} not found"
-        )
+    if payload.selected_list_id is not None:
+        owner_id = payload.user_id if payload.user_id is not None else None
+        if fetch_list(db, payload.selected_list_id, owner_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"List with id {payload.selected_list_id} not found"
+            )
+    user = None
+    if payload.user_id is not None:
+        user = fetch_user_by_id(db, payload.user_id)
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User with id {payload.user_id} not found"
+            )
     try:
         update_settings(db, payload.theme, payload.view, payload.selected_list_id)
+        if payload.user_id is not None:
+            update_user_theme_view(db, payload.user_id, payload.theme, payload.view)
+            if payload.ui_state is not None:
+                ui_state_json = json.dumps(payload.ui_state)
+                update_user_ui_state(db, payload.user_id, ui_state_json)
+            if user:
+                user_with_theme = {**user, "theme": payload.theme}
+                inventory = parse_inventory(user.get("inventory"))
+                titles = parse_titles(user.get("titles"))
+                ensure_theme_inventory(db, user_with_theme, inventory, titles)
         return {"theme": payload.theme, "view": payload.view, "selected_list_id": payload.selected_list_id}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save settings: {str(e)}"
         )
+
+
+@app.post("/goals/score")
+def score_goal(payload: GoalPayload, db=Depends(get_db)):
+    if fetch_user_by_id(db, payload.user_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with id {payload.user_id} not found"
+        )
+    updated = increment_user_goals(db, payload.user_id, 1)
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update goals"
+        )
+    return {"goals": updated}
