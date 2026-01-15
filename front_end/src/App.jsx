@@ -1892,6 +1892,7 @@ function SettingsPanel({ open, onClose, theme, setTheme, user, setUser, unlocked
         onClose={() => setProfileOpen(false)}
         user={user}
         setUser={setUser}
+        theme={theme}
         onLogout={() => {
           setProfileOpen(false);
           if (onLogout) onLogout();
@@ -2465,7 +2466,7 @@ const parseApiError = (err, fallback) => {
   return fallback;
 };
 
-function ProfileModal({ open, onClose, user, setUser, onLogout }) {
+function ProfileModal({ open, onClose, user, setUser, onLogout, theme }) {
   const [showPassword, setShowPassword] = useState(false);
   const [usernameModalOpen, setUsernameModalOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
@@ -2587,7 +2588,7 @@ function ProfileModal({ open, onClose, user, setUser, onLogout }) {
             </div>
           </div>
           <div
-            className="panel"
+            className="panel logout-panel"
             style={{
               marginTop: "14px",
               display: "flex",
@@ -2597,11 +2598,22 @@ function ProfileModal({ open, onClose, user, setUser, onLogout }) {
             }}
           >
             <div>
-              <div style={{ fontWeight: 600 }}>Log out</div>
-              <div className="muted">You will need to sign back in to access your tasks.</div>
+              {theme === "football" ? (
+                <div style={{ fontWeight: 600 }}>Red card:</div>
+              ) : (
+                <>
+                  <div style={{ fontWeight: 600 }}>Log out</div>
+                  <div className="muted">You will need to sign back in to access your tasks.</div>
+                </>
+              )}
             </div>
-            <button type="button" className="button danger" onClick={handleLogoutClick}>
-              Log out
+            <button
+              type="button"
+              className="button danger logout-button"
+              onClick={handleLogoutClick}
+              aria-label="Log out"
+            >
+              {theme === "football" ? null : "Log out"}
             </button>
           </div>
         </div>
