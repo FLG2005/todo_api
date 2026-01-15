@@ -171,7 +171,7 @@ def get_openai_client() -> OpenAI:
     if not api_key:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="OpenAI API key missing. Set OPENAI_API_KEY or add it to back_end/.env",
+            detail="OpenAI API key missing. Set OPENAI_API_KEY or add it to api/.env",
         )
     try:
         return OpenAI(api_key=api_key)

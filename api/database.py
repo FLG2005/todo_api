@@ -1,28 +1,67 @@
-import sqlite3
-from pathlib import Path
+import os
 from typing import Optional
 from datetime import datetime
 
-# Always store the database next to this file so the API uses one consistent DB
-DB_FILE = Path(__file__).resolve().with_name("todo.db")
+from libsql_client import create_client
 
 
-def connect() -> sqlite3.Connection:
-    """Create a SQLite connection to todo.db with safe defaults enabled."""
-    # This creates todo.db in the same folder if it doesn't exist yet.
-    # check_same_thread=False allows the connection to be used across different threads,
-    # which is necessary for FastAPI's async handling.
-    conn = sqlite3.connect(str(DB_FILE), check_same_thread=False)
+class TursoCursor:
+    def __init__(self, result):
+        self._rows = _rows_to_dicts(result)
+        self._index = 0
+        self.rowcount = result.rows_affected or 0
+        self.lastrowid = result.last_insert_rowid
 
-    # Makes rows behave like dictionaries (row["text"]) instead of tuples (row[1]).
-    conn.row_factory = sqlite3.Row
+    def fetchone(self):
+        if self._index >= len(self._rows):
+            return None
+        row = self._rows[self._index]
+        self._index += 1
+        return row
 
-    # Good practice: enforce foreign keys if you ever add them later.
-    conn.execute("PRAGMA foreign_keys = ON;")
-    return conn
+    def fetchall(self):
+        if self._index == 0:
+            self._index = len(self._rows)
+            return list(self._rows)
+        rows = self._rows[self._index:]
+        self._index = len(self._rows)
+        return list(rows)
 
 
-def create_table(conn: sqlite3.Connection) -> None:
+class TursoConnection:
+    def __init__(self, client):
+        self._client = client
+
+    def execute(self, sql: str, params: tuple | list | dict | None = None) -> TursoCursor:
+        result = self._client.execute(sql, params or ())
+        return TursoCursor(result)
+
+    def commit(self) -> None:
+        # Turso executes statements immediately; commit is a no-op for compatibility.
+        return None
+
+    def close(self) -> None:
+        self._client.close()
+
+
+def _rows_to_dicts(result) -> list[dict]:
+    if not result.rows:
+        return []
+    columns = result.columns or []
+    return [dict(zip(columns, row)) for row in result.rows]
+
+
+def connect() -> TursoConnection:
+    """Create a Turso client connection using environment credentials."""
+    url = os.getenv("TURSO_DATABASE_URL")
+    token = os.getenv("TURSO_AUTH_TOKEN")
+    if not url or not token:
+        raise RuntimeError("Missing TURSO_DATABASE_URL or TURSO_AUTH_TOKEN environment variables.")
+    client = create_client(url, auth_token=token)
+    return TursoConnection(client)
+
+
+def create_table(conn: TursoConnection) -> None:
     """Create the todos table if it does not already exist."""
     create_users_table(conn)
     create_lists_table(conn)
@@ -31,7 +70,7 @@ def create_table(conn: sqlite3.Connection) -> None:
     ensure_default_user(conn)
 
 
-def create_lists_table(conn: sqlite3.Connection) -> None:
+def create_lists_table(conn: TursoConnection) -> None:
     """Create the lists table and ensure a default list row."""
     conn.execute("""
         CREATE TABLE IF NOT EXISTS lists (
@@ -54,7 +93,7 @@ def create_lists_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def create_todos_table(conn: sqlite3.Connection) -> None:
+def create_todos_table(conn: TursoConnection) -> None:
     """Create todos table with list_id support or migrate existing schema."""
     conn.execute("""
         CREATE TABLE IF NOT EXISTS todos (
@@ -86,7 +125,7 @@ def create_todos_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def create_users_table(conn: sqlite3.Connection) -> None:
+def create_users_table(conn: TursoConnection) -> None:
     """Create users table for simple auth."""
     conn.execute(
         """
@@ -163,7 +202,7 @@ def create_users_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def ensure_default_user(conn: sqlite3.Connection) -> None:
+def ensure_default_user(conn: TursoConnection) -> None:
     """Ensure a fallback default user exists for legacy data."""
     cursor = conn.execute("SELECT id FROM users WHERE id = 1;")
     row = cursor.fetchone()
@@ -173,7 +212,7 @@ def ensure_default_user(conn: sqlite3.Connection) -> None:
         )
     conn.commit()
 
-def create_settings_table(conn: sqlite3.Connection) -> None:
+def create_settings_table(conn: TursoConnection) -> None:
     """Create the settings table with a single row if missing."""
     conn.execute("""
         CREATE TABLE IF NOT EXISTS settings (
@@ -201,7 +240,7 @@ def create_settings_table(conn: sqlite3.Connection) -> None:
 # ADD
 
 
-def add_todo(conn: sqlite3.Connection, text: str, related_id: Optional[int] = None, list_id: int = 1, deadline: Optional[str] = None) -> int:
+def add_todo(conn: TursoConnection, text: str, related_id: Optional[int] = None, list_id: int = 1, deadline: Optional[str] = None) -> int:
     """Insert a new todo and return its auto-generated id."""
     cursor = conn.execute(
         "INSERT INTO todos (text, related_id, list_id, deadline, completed, flags) VALUES (?, ?, ?, ?, 0, 0);",
@@ -213,7 +252,7 @@ def add_todo(conn: sqlite3.Connection, text: str, related_id: Optional[int] = No
 # LIST
 
 
-def list_todos(conn: sqlite3.Connection):
+def list_todos(conn: TursoConnection):
     """Return all todos ordered by id as dictionaries (legacy, unscoped)."""
     cursor = conn.execute(
         "SELECT id, text, related_id, list_id, deadline, completed, flags FROM todos ORDER BY flags DESC, id ASC;"
@@ -222,7 +261,7 @@ def list_todos(conn: sqlite3.Connection):
     return [dict(row) for row in rows]
 
 
-def list_todos_for_list(conn: sqlite3.Connection, list_id: int, user_id: int):
+def list_todos_for_list(conn: TursoConnection, list_id: int, user_id: int):
     """Return todos for a specific list ordered by id, scoped to user."""
     cursor = conn.execute(
         """
@@ -237,7 +276,7 @@ def list_todos_for_list(conn: sqlite3.Connection, list_id: int, user_id: int):
     return [dict(row) for row in cursor.fetchall()]
 
 
-def list_todos_for_user(conn: sqlite3.Connection, user_id: int):
+def list_todos_for_user(conn: TursoConnection, user_id: int):
     """Return all todos for a user by joining through lists."""
     cursor = conn.execute(
         """
@@ -252,7 +291,7 @@ def list_todos_for_user(conn: sqlite3.Connection, user_id: int):
     return [dict(row) for row in cursor.fetchall()]
 
 
-def fetch_todo_for_user(conn: sqlite3.Connection, todo_id: int, user_id: int) -> Optional[dict]:
+def fetch_todo_for_user(conn: TursoConnection, todo_id: int, user_id: int) -> Optional[dict]:
     """Fetch a todo only if it belongs to the given user via list ownership."""
     cursor = conn.execute(
         """
@@ -269,7 +308,7 @@ def fetch_todo_for_user(conn: sqlite3.Connection, todo_id: int, user_id: int) ->
 # EDIT
 
 
-def update_todo_text(conn: sqlite3.Connection, todo_id: int, new_text: str) -> bool:
+def update_todo_text(conn: TursoConnection, todo_id: int, new_text: str) -> bool:
     """Update the text field for a todo and report success."""
     cursor = conn.execute(
         "UPDATE todos SET text = ? WHERE id = ?;",
@@ -279,7 +318,7 @@ def update_todo_text(conn: sqlite3.Connection, todo_id: int, new_text: str) -> b
     return cursor.rowcount > 0
 
 
-def update_todo_related_id(conn: sqlite3.Connection, todo_id: int, new_related_id: Optional[int]) -> bool:
+def update_todo_related_id(conn: TursoConnection, todo_id: int, new_related_id: Optional[int]) -> bool:
     """Update the related_id of a todo and return whether a row was changed."""
     cursor = conn.execute(
         "UPDATE todos SET related_id = ? WHERE id = ?;",
@@ -289,7 +328,7 @@ def update_todo_related_id(conn: sqlite3.Connection, todo_id: int, new_related_i
     return cursor.rowcount > 0
 
 
-def update_todo_deadline(conn: sqlite3.Connection, todo_id: int, deadline: Optional[str]) -> bool:
+def update_todo_deadline(conn: TursoConnection, todo_id: int, deadline: Optional[str]) -> bool:
     """Update deadline for a todo."""
     cursor = conn.execute(
         "UPDATE todos SET deadline = ? WHERE id = ?;",
@@ -299,7 +338,7 @@ def update_todo_deadline(conn: sqlite3.Connection, todo_id: int, deadline: Optio
     return cursor.rowcount > 0
 
 
-def update_todo_completed(conn: sqlite3.Connection, todo_id: int, completed: bool) -> bool:
+def update_todo_completed(conn: TursoConnection, todo_id: int, completed: bool) -> bool:
     """Update completion flag for a todo."""
     cursor = conn.execute(
         "UPDATE todos SET completed = ? WHERE id = ?;",
@@ -309,7 +348,7 @@ def update_todo_completed(conn: sqlite3.Connection, todo_id: int, completed: boo
     return cursor.rowcount > 0
 
 
-def update_todo_flags(conn: sqlite3.Connection, todo_id: int, flags: int) -> bool:
+def update_todo_flags(conn: TursoConnection, todo_id: int, flags: int) -> bool:
     """Update the importance flags for a todo."""
     cursor = conn.execute(
         "UPDATE todos SET flags = ? WHERE id = ?;",
@@ -321,7 +360,7 @@ def update_todo_flags(conn: sqlite3.Connection, todo_id: int, flags: int) -> boo
 # DELETE
 
 
-def delete_todo(conn: sqlite3.Connection, todo_id: int) -> bool:
+def delete_todo(conn: TursoConnection, todo_id: int) -> bool:
     """Delete a todo and any rows that reference it by related_id."""
     cursor = conn.execute(
         "DELETE FROM todos WHERE id = ? or related_id = ?;",
@@ -331,7 +370,7 @@ def delete_todo(conn: sqlite3.Connection, todo_id: int) -> bool:
     return cursor.rowcount > 0
 
 
-def print_todos(rows: list[sqlite3.Row]) -> None:
+def print_todos(rows: list[dict]) -> None:
     """Log todos to stdout in a readable format for debugging."""
     if not rows:
         print("No todos yet.")
@@ -345,11 +384,10 @@ def print_todos(rows: list[sqlite3.Row]) -> None:
     print("")
 
 
-def fetch_related_todos(db, related_id: int, list_id: int | None = None):
+def fetch_related_todos(db: TursoConnection, related_id: int, list_id: int | None = None):
     """Return todos whose related_id matches the provided id (optionally within a list)."""
-    cursor = db.cursor()
     if list_id is not None:
-        cursor.execute(
+        cursor = db.execute(
             """
             SELECT *
             FROM todos
@@ -358,7 +396,7 @@ def fetch_related_todos(db, related_id: int, list_id: int | None = None):
             (related_id, list_id)
         )
     else:
-        cursor.execute(
+        cursor = db.execute(
             """
             SELECT *
             FROM todos
@@ -366,14 +404,12 @@ def fetch_related_todos(db, related_id: int, list_id: int | None = None):
             """,
             (related_id,)
         )
-    rows = cursor.fetchall()
-    return [dict(row) for row in rows]
+    return [dict(row) for row in cursor.fetchall()]
 
 
-def fetch_a_todo(db, todo_id: int):
+def fetch_a_todo(db: TursoConnection, todo_id: int):
     """Fetch a single todo by id as a dict or return None when missing."""
-    cursor = db.cursor()
-    cursor.execute(
+    cursor = db.execute(
         """
         SELECT t.*
         FROM todos t
@@ -387,10 +423,9 @@ def fetch_a_todo(db, todo_id: int):
     return dict(row)
 
 
-def change_related_id(db, todo_id: int, related_id: int | None):
+def change_related_id(db: TursoConnection, todo_id: int, related_id: int | None):
     """Update the related_id for a todo, allowing it to be cleared."""
-    cursor = db.cursor()
-    cursor.execute(
+    cursor = db.execute(
         """
         UPDATE todos
         SET related_id = ?
@@ -402,7 +437,7 @@ def change_related_id(db, todo_id: int, related_id: int | None):
     return cursor.rowcount > 0
 
 
-def fetch_settings(conn: sqlite3.Connection) -> dict:
+def fetch_settings(conn: TursoConnection) -> dict:
     """Return the stored theme and view settings, creating defaults if absent."""
     create_settings_table(conn)
     cursor = conn.execute("SELECT theme, view, selected_list_id FROM settings WHERE id = 1;")
@@ -412,7 +447,7 @@ def fetch_settings(conn: sqlite3.Connection) -> dict:
     return dict(row)
 
 
-def update_settings(conn: sqlite3.Connection, theme: str, view: str, selected_list_id: int | None) -> None:
+def update_settings(conn: TursoConnection, theme: str, view: str, selected_list_id: int | None) -> None:
     """Persist theme and view settings as a single-row table."""
     create_settings_table(conn)
     conn.execute(
@@ -426,7 +461,7 @@ def update_settings(conn: sqlite3.Connection, theme: str, view: str, selected_li
     conn.commit()
 
 
-def list_lists(conn: sqlite3.Connection, user_id: int) -> list[dict]:
+def list_lists(conn: TursoConnection, user_id: int) -> list[dict]:
     """Return all todo lists for a user."""
     cursor = conn.execute(
         """
@@ -445,21 +480,21 @@ def list_lists(conn: sqlite3.Connection, user_id: int) -> list[dict]:
     return [dict(row) for row in cursor.fetchall()]
 
 
-def add_list(conn: sqlite3.Connection, name: str, user_id: int) -> int:
+def add_list(conn: TursoConnection, name: str, user_id: int) -> int:
     """Create a new list for a user and return its id."""
     cursor = conn.execute("INSERT INTO lists (name, user_id) VALUES (?, ?);", (name, user_id))
     conn.commit()
     return cursor.lastrowid
 
 
-def update_list_name(conn: sqlite3.Connection, list_id: int, name: str, user_id: int) -> bool:
+def update_list_name(conn: TursoConnection, list_id: int, name: str, user_id: int) -> bool:
     """Rename a list if it belongs to the user."""
     cursor = conn.execute("UPDATE lists SET name = ? WHERE id = ? AND user_id = ?;", (name, list_id, user_id))
     conn.commit()
     return cursor.rowcount > 0
 
 
-def delete_list(conn: sqlite3.Connection, list_id: int, user_id: int) -> bool:
+def delete_list(conn: TursoConnection, list_id: int, user_id: int) -> bool:
     """Delete a list and its todos for the user."""
     # Remove todos in the list first to avoid orphaned rows when foreign keys are off
     conn.execute("DELETE FROM todos WHERE list_id = ?;", (list_id,))
@@ -468,7 +503,7 @@ def delete_list(conn: sqlite3.Connection, list_id: int, user_id: int) -> bool:
     return cursor.rowcount > 0
 
 
-def fetch_list(conn: sqlite3.Connection, list_id: int, user_id: int | None = None) -> dict | None:
+def fetch_list(conn: TursoConnection, list_id: int, user_id: int | None = None) -> dict | None:
     if user_id is None:
         cursor = conn.execute("SELECT id, name, user_id FROM lists WHERE id = ?;", (list_id,))
     else:
@@ -477,7 +512,7 @@ def fetch_list(conn: sqlite3.Connection, list_id: int, user_id: int | None = Non
     return dict(row) if row else None
 
 
-def add_user(conn: sqlite3.Connection, username: str, password_hash: str) -> int:
+def add_user(conn: TursoConnection, username: str, password_hash: str) -> int:
     """Create a new user and return id."""
     today = datetime.utcnow().date().isoformat()
     cursor = conn.execute(
@@ -510,7 +545,7 @@ def add_user(conn: sqlite3.Connection, username: str, password_hash: str) -> int
     return cursor.lastrowid
 
 
-def fetch_user_by_username(conn: sqlite3.Connection, username: str) -> dict | None:
+def fetch_user_by_username(conn: TursoConnection, username: str) -> dict | None:
     """Fetch user record by username."""
     cursor = conn.execute(
         """
@@ -540,7 +575,7 @@ def fetch_user_by_username(conn: sqlite3.Connection, username: str) -> dict | No
     return dict(row) if row else None
 
 
-def fetch_user_by_id(conn: sqlite3.Connection, user_id: int) -> dict | None:
+def fetch_user_by_id(conn: TursoConnection, user_id: int) -> dict | None:
     """Fetch user record by id."""
     cursor = conn.execute(
         """
@@ -570,7 +605,7 @@ def fetch_user_by_id(conn: sqlite3.Connection, user_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def update_user_login_meta(conn: sqlite3.Connection, user_id: int, login_streak: int, login_best: int, last_login: str, check_coins: int) -> bool:
+def update_user_login_meta(conn: TursoConnection, user_id: int, login_streak: int, login_best: int, last_login: str, check_coins: int) -> bool:
     """Update login streak metadata for a user."""
     cursor = conn.execute(
         "UPDATE users SET login_streak = ?, login_best = ?, last_login = ?, check_coins = ? WHERE id = ?;",
@@ -593,7 +628,7 @@ def rank_for_level(level: int) -> str:
     return "Elite Executor"
 
 
-def increment_tasks_checked_off(conn: sqlite3.Connection, user_id: int, amount: int = 1):
+def increment_tasks_checked_off(conn: TursoConnection, user_id: int, amount: int = 1):
     """Increment task counters and award XP; returns updated stats dict or False when user missing."""
     cursor = conn.execute(
         """
@@ -656,7 +691,7 @@ def increment_tasks_checked_off(conn: sqlite3.Connection, user_id: int, amount: 
     }
 
 
-def ensure_user_default_list(conn: sqlite3.Connection, user_id: int) -> int:
+def ensure_user_default_list(conn: TursoConnection, user_id: int) -> int:
     """Ensure a default list exists for the given user and return its id."""
     cursor = conn.execute("SELECT id FROM lists WHERE user_id = ? ORDER BY id ASC LIMIT 1;", (user_id,))
     row = cursor.fetchone()
@@ -670,7 +705,7 @@ def ensure_user_default_list(conn: sqlite3.Connection, user_id: int) -> int:
     return cursor.lastrowid
 
 
-def update_user_username(conn: sqlite3.Connection, user_id: int, new_username: str) -> bool:
+def update_user_username(conn: TursoConnection, user_id: int, new_username: str) -> bool:
     """Update username for a given user."""
     cursor = conn.execute(
         "UPDATE users SET username = ? WHERE id = ?;",
@@ -680,7 +715,7 @@ def update_user_username(conn: sqlite3.Connection, user_id: int, new_username: s
     return cursor.rowcount > 0
 
 
-def update_user_password(conn: sqlite3.Connection, user_id: int, new_password_hash: str) -> bool:
+def update_user_password(conn: TursoConnection, user_id: int, new_password_hash: str) -> bool:
     """Update password hash for a user."""
     cursor = conn.execute(
         "UPDATE users SET password_hash = ? WHERE id = ?;",
@@ -690,7 +725,7 @@ def update_user_password(conn: sqlite3.Connection, user_id: int, new_password_ha
     return cursor.rowcount > 0
 
 
-def update_user_theme_view(conn: sqlite3.Connection, user_id: int, theme: str, view: str) -> bool:
+def update_user_theme_view(conn: TursoConnection, user_id: int, theme: str, view: str) -> bool:
     """Persist a user's last selected theme and view."""
     cursor = conn.execute(
         "UPDATE users SET theme = ?, view = ? WHERE id = ?;",
@@ -700,7 +735,7 @@ def update_user_theme_view(conn: sqlite3.Connection, user_id: int, theme: str, v
     return cursor.rowcount > 0
 
 
-def update_user_ui_state(conn: sqlite3.Connection, user_id: int, ui_state: str) -> bool:
+def update_user_ui_state(conn: TursoConnection, user_id: int, ui_state: str) -> bool:
     """Persist a user's UI state payload."""
     cursor = conn.execute(
         "UPDATE users SET ui_state = ? WHERE id = ?;",
@@ -710,7 +745,7 @@ def update_user_ui_state(conn: sqlite3.Connection, user_id: int, ui_state: str) 
     return cursor.rowcount > 0
 
 
-def increment_user_goals(conn: sqlite3.Connection, user_id: int, amount: int = 1) -> int | None:
+def increment_user_goals(conn: TursoConnection, user_id: int, amount: int = 1) -> int | None:
     """Increment a user's goal count and return the updated total."""
     cursor = conn.execute("SELECT goals FROM users WHERE id = ?;", (user_id,))
     row = cursor.fetchone()
@@ -722,7 +757,7 @@ def increment_user_goals(conn: sqlite3.Connection, user_id: int, amount: int = 1
     return new_goals
 
 
-def update_user_balance_and_inventory(conn: sqlite3.Connection, user_id: int, check_coins: int, inventory_json: str) -> bool:
+def update_user_balance_and_inventory(conn: TursoConnection, user_id: int, check_coins: int, inventory_json: str) -> bool:
     """Update a user's coin balance and stored inventory payload."""
     cursor = conn.execute(
         "UPDATE users SET check_coins = ?, inventory = ? WHERE id = ?;",
@@ -732,7 +767,7 @@ def update_user_balance_and_inventory(conn: sqlite3.Connection, user_id: int, ch
     return cursor.rowcount > 0
 
 
-def update_user_inventory_and_titles(conn: sqlite3.Connection, user_id: int, inventory_json: str, titles_json: str) -> bool:
+def update_user_inventory_and_titles(conn: TursoConnection, user_id: int, inventory_json: str, titles_json: str) -> bool:
     """Update a user's inventory and titles payloads."""
     cursor = conn.execute(
         "UPDATE users SET inventory = ?, titles = ? WHERE id = ?;",
@@ -743,7 +778,7 @@ def update_user_inventory_and_titles(conn: sqlite3.Connection, user_id: int, inv
 
 
 def update_user_balance_inventory_titles(
-    conn: sqlite3.Connection,
+    conn: TursoConnection,
     user_id: int,
     check_coins: int,
     inventory_json: str,
@@ -758,7 +793,7 @@ def update_user_balance_inventory_titles(
     return cursor.rowcount > 0
 
 
-def update_user_current_title(conn: sqlite3.Connection, user_id: int, title_key: str) -> bool:
+def update_user_current_title(conn: TursoConnection, user_id: int, title_key: str) -> bool:
     """Set the currently equipped title for a user."""
     cursor = conn.execute(
         "UPDATE users SET current_title = ? WHERE id = ?;",
@@ -768,7 +803,7 @@ def update_user_current_title(conn: sqlite3.Connection, user_id: int, title_key:
     return cursor.rowcount > 0
 
 
-def fetch_user_stats(conn: sqlite3.Connection, user_id: int) -> dict | None:
+def fetch_user_stats(conn: TursoConnection, user_id: int) -> dict | None:
     """Lightweight fetch for frequently returned user fields including XP/level."""
     cursor = conn.execute(
         """
