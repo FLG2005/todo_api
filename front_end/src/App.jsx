@@ -281,7 +281,7 @@ export default function App() {
   const userLevel = Number.isFinite(user?.level) ? Math.max(user.level, 1) : 1;
   const userRank = user?.rank || "Task Trainee";
   const itemsCollected = Array.isArray(user?.inventory) ? user.inventory.length : 0;
-  const totalCollectibles = 3;
+  const totalCollectibles = 9;
   const itemsCollectedLabel = `${Math.min(itemsCollected, totalCollectibles)} / ${totalCollectibles}`;
 
   useEffect(() => {
@@ -1197,26 +1197,10 @@ export default function App() {
       if (state.x <= boundsNow.minX) {
         state.x = boundsNow.minX;
         state.vx = Math.abs(state.vx);
-        if (boundsNow.goalMouth) {
-          const centerY = state.y + boundsNow.size / 2;
-          if (centerY >= boundsNow.goalMouth.y1 && centerY <= boundsNow.goalMouth.y2) {
-            if (prevX > boundsNow.minX) {
-              maybeTriggerGoal(boundsNow.minX, centerY);
-            }
-          }
-        }
       }
       if (state.x >= boundsNow.maxX) {
         state.x = boundsNow.maxX;
         state.vx = -Math.abs(state.vx);
-        if (boundsNow.goalMouth) {
-          const centerY = state.y + boundsNow.size / 2;
-          if (centerY >= boundsNow.goalMouth.y1 && centerY <= boundsNow.goalMouth.y2) {
-            if (prevX < boundsNow.maxX) {
-              maybeTriggerGoal(boundsNow.maxX + boundsNow.size, centerY);
-            }
-          }
-        }
       }
       if (state.y <= boundsNow.minY) {
         state.y = boundsNow.minY;
@@ -1230,25 +1214,29 @@ export default function App() {
       const radius = boundsNow.size / 2;
       const nextCx = state.x + radius;
       const nextCy = state.y + radius;
-      if (boundsNow.goalMouth) {
-        const centerY = nextCy;
-        const withinGoalMouth = centerY >= boundsNow.goalMouth.y1 && centerY <= boundsNow.goalMouth.y2;
+      if (boundsNow.goalBoxes) {
         const leftLineX = boundsNow.minX;
         const rightLineX = boundsNow.maxX + boundsNow.size;
         const boundaryTolerance = 0.5;
         const touchesLeftLine = Math.abs(state.x - leftLineX) <= boundaryTolerance;
         const touchesRightLine = Math.abs(state.x + boundsNow.size - rightLineX) <= boundaryTolerance;
-        const leftContact = withinGoalMouth && touchesLeftLine;
-        const rightContact = withinGoalMouth && touchesRightLine;
+        const ballTop = state.y;
+        const ballBottom = state.y + boundsNow.size;
+        const leftBox = boundsNow.goalBoxes.left;
+        const rightBox = boundsNow.goalBoxes.right;
+        const overlapsLeftBoxY = ballBottom >= leftBox.y1 && ballTop <= leftBox.y2;
+        const overlapsRightBoxY = ballBottom >= rightBox.y1 && ballTop <= rightBox.y2;
+        const leftContact = touchesLeftLine && overlapsLeftBoxY;
+        const rightContact = touchesRightLine && overlapsRightBoxY;
         if (leftContact && !goalLineContactRef.current.left) {
           goalLineContactRef.current.left = true;
-          maybeTriggerGoal(leftLineX, centerY);
+          maybeTriggerGoal(leftLineX, nextCy);
         } else if (!leftContact) {
           goalLineContactRef.current.left = false;
         }
         if (rightContact && !goalLineContactRef.current.right) {
           goalLineContactRef.current.right = true;
-          maybeTriggerGoal(rightLineX, centerY);
+          maybeTriggerGoal(rightLineX, nextCy);
         } else if (!rightContact) {
           goalLineContactRef.current.right = false;
         }
@@ -1301,6 +1289,8 @@ export default function App() {
     <ErrorBoundary>
       {theme === "football" ? (
         <div className="football-ball-layer" aria-hidden="true">
+          <div className="goal-line left" aria-hidden="true"></div>
+          <div className="goal-line right" aria-hidden="true"></div>
           {goalExplosions.map((explosion) => (
             <div
               key={explosion.id}

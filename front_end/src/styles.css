@@ -274,6 +274,25 @@ body.theme-football .logout-panel {
   z-index: 0;
 }
 
+.goal-line {
+  position: fixed;
+  top: calc(var(--pitch-top, 5vh) + ((var(--pitch-bottom, 95vh) - var(--pitch-top, 5vh)) * 0.3704));
+  height: calc((var(--pitch-bottom, 95vh) - var(--pitch-top, 5vh)) * 0.2593);
+  width: 4px;
+  background: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.goal-line.left {
+  left: calc(var(--pitch-left, 5vw) - 2px);
+}
+
+.goal-line.right {
+  left: calc(var(--pitch-right, 95vw) - 2px);
+}
+
 .football-ball {
   position: absolute;
   top: 0;
