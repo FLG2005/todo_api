@@ -2,15 +2,15 @@ import os
 from typing import Optional
 from datetime import datetime
 
-from libsql_experimental import create_client
+import libsql_experimental as libsql
 
 
 class TursoCursor:
-    def __init__(self, result):
-        self._rows = _rows_to_dicts(result)
+    def __init__(self, cursor):
+        self._rows = _rows_to_dicts(cursor)
         self._index = 0
-        self.rowcount = result.rows_affected or 0
-        self.lastrowid = result.last_insert_rowid
+        self.rowcount = cursor.rowcount if cursor.rowcount is not None else 0
+        self.lastrowid = getattr(cursor, "lastrowid", None)
 
     def fetchone(self):
         if self._index >= len(self._rows):
@@ -33,32 +33,33 @@ class TursoConnection:
         self._client = client
 
     def execute(self, sql: str, params: tuple | list | dict | None = None) -> TursoCursor:
-        result = self._client.execute(sql, params or ())
-        return TursoCursor(result)
+        cursor = self._client.execute(sql, params or ())
+        return TursoCursor(cursor)
 
     def commit(self) -> None:
-        # Turso executes statements immediately; commit is a no-op for compatibility.
-        return None
+        if hasattr(self._client, "commit"):
+            self._client.commit()
 
     def close(self) -> None:
         self._client.close()
 
 
-def _rows_to_dicts(result) -> list[dict]:
-    if not result.rows:
+def _rows_to_dicts(cursor) -> list[dict]:
+    if cursor.description is None:
         return []
-    columns = result.columns or []
-    return [dict(zip(columns, row)) for row in result.rows]
+    columns = [col[0] for col in cursor.description]
+    rows = cursor.fetchall()
+    return [dict(zip(columns, row)) for row in rows]
 
 
 def connect() -> TursoConnection:
-    """Create a Turso client connection using environment credentials."""
+    """Create a Turso connection using environment credentials."""
     url = os.getenv("TURSO_DATABASE_URL")
     token = os.getenv("TURSO_AUTH_TOKEN")
     if not url or not token:
         raise RuntimeError("Missing TURSO_DATABASE_URL or TURSO_AUTH_TOKEN environment variables.")
-    client = create_client(url, auth_token=token)
-    return TursoConnection(client)
+    conn = libsql.connect(url, auth_token=token)
+    return TursoConnection(conn)
 
 
 def create_table(conn: TursoConnection) -> None:
