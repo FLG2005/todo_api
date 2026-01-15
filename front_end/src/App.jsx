@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, Component } from "react";
 import {
   BadgeInfo as HelpIcon,
   User as UserIcon,
@@ -8,12 +8,17 @@ import {
   Navigation as NavigationIcon,
   ShieldQuestionMark as QueryIcon,
   Settings as SettingsIcon,
+  Lock,
   ChevronDown,
   Eye,
   EyeOff,
   Flame,
-  Coins
+  Coins,
+  ShoppingCart,
+  Crown,
+  Sparkles
 } from "lucide-react";
+import { PiSoccerBall } from "react-icons/pi";
 
 const themes = {
   default: { className: "theme-default", label: "Default" },
@@ -21,7 +26,8 @@ const themes = {
   minimal: { className: "theme-minimal", label: "Minimalist" },
   space: { className: "theme-space", label: "Space" },
   royalGarden: { className: "theme-royal-garden", label: "Royal Garden" },
-  beachDay: { className: "theme-beach-day", label: "Beach Day" }
+  beachDay: { className: "theme-beach-day", label: "Beach Day" },
+  football: { className: "theme-football", label: "Football" }
 };
 
 const themePreviews = {
@@ -30,8 +36,46 @@ const themePreviews = {
   minimal: { bg: "#f7f7f8", border: "#1f2937" },
   space: { bg: "#0f1429", border: "#6ac7ff" },
   royalGarden: { bg: "#0f2017", border: "#d4af37" },
-  beachDay: { bg: "#cfe8ff", border: "#f5d8a5" }
+  beachDay: { bg: "#cfe8ff", border: "#f5d8a5" },
+  football: { bg: "#33860e", border: "#0f2d16" }
 };
+
+const levelLockedThemes = [{ key: "football", level: 10 }];
+const themeLevelRequirement = levelLockedThemes.reduce((map, entry) => {
+  map[entry.key] = entry.level;
+  return map;
+}, {});
+const getLevelUnlockedThemes = (level = 1) => levelLockedThemes.filter((entry) => level >= entry.level).map((entry) => entry.key);
+const filterThemesByLevel = (themeKeys = [], level = 1) =>
+  themeKeys.filter((key) => {
+    const requirement = themeLevelRequirement[key];
+    return !requirement || level >= requirement;
+  });
+
+const themeStoreItems = [
+  {
+    key: "royalGarden",
+    label: "Royal Garden",
+    description: "Verdant palette with gold accents for focus-friendly lists.",
+    price: 150
+  },
+  {
+    key: "beachDay",
+    label: "Beach Day",
+    description: "Sunny gradient, airy panels, and relaxed coastal vibes.",
+    price: 150
+  },
+  {
+    key: "football",
+    label: "Football",
+    description: "Light pitch greens, crisp white lines, and goal-bright splashes.",
+    price: 0,
+    unlockLevel: 10,
+    purchasable: false
+  }
+];
+
+const baseUnlockedThemes = Object.keys(themes).filter((key) => !themeStoreItems.some((item) => item.key === key));
 
 const views = ["front", "lists", "detail"];
 const viewLabels = {
@@ -98,6 +142,40 @@ const sortTodosByFlags = (items = []) =>
 
 const cleanAiText = (text) => (typeof text === "string" ? text.replace(/\*/g, "") : text || "");
 
+const parseInventory = (value) => (Array.isArray(value) ? value.filter(Boolean).map(String) : []);
+
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("Unexpected render error", error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="app">
+          <div className="status error" style={{ margin: "20px auto", maxWidth: 520, textAlign: "center" }}>
+            <p style={{ fontWeight: 700 }}>Something went wrong while rendering.</p>
+            <p className="muted">{this.state.error?.message || "Unknown error"}</p>
+            <button className="button" onClick={() => window.location.reload()}>
+              Reload
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const api = {
   url: (path) => `${API_BASE}${path}`,
   json: async (path, options = {}) => {
@@ -148,6 +226,8 @@ export default function App() {
   const [queriesModalOpen, setQueriesModalOpen] = useState(false);
   const [queriesFaqOpen, setQueriesFaqOpen] = useState(false);
   const [queriesSupportOpen, setQueriesSupportOpen] = useState(false);
+  const [confirmLogoutOpen, setConfirmLogoutOpen] = useState(false);
+  const [purchasePrompt, setPurchasePrompt] = useState(null);
   const [coinsOpen, setCoinsOpen] = useState(false);
   const [checkCoins, setCheckCoins] = useState(0);
   const [coinsInfoOpen, setCoinsInfoOpen] = useState(false);
@@ -157,8 +237,26 @@ export default function App() {
   const [authMode, setAuthMode] = useState("login");
   const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+  const [lockedPromptOpen, setLockedPromptOpen] = useState(false);
   const [user, setUser] = useState(null);
   const refreshedUserRef = useRef(false);
+  const [notice, setNotice] = useState(null);
+  const noticeTimeoutRef = useRef(null);
+  const [unlockedThemes, setUnlockedThemes] = useState(baseUnlockedThemes);
+  const loginStreak = Number.isFinite(user?.login_streak) ? user.login_streak : 0;
+  const loginBest = Number.isFinite(user?.login_best)
+    ? user.login_best
+    : Number.isFinite(user?.login_streak)
+      ? user.login_streak
+      : 1;
+  const tasksCheckedOff = Number.isFinite(user?.tasks_checked_off) ? user.tasks_checked_off : 0;
+  const tasksCheckedOffToday = Number.isFinite(user?.tasks_checked_off_today) ? user.tasks_checked_off_today : 0;
+  const xpProgress = Number.isFinite(user?.xp) ? Math.min(Math.max(user.xp, 0), 100) : 0;
+  const userLevel = Number.isFinite(user?.level) ? Math.max(user.level, 1) : 1;
+  const userRank = user?.rank || "Task Trainee";
+  const itemsCollected = Array.isArray(user?.inventory) ? user.inventory.length : 0;
+  const totalCollectibles = 3;
+  const itemsCollectedLabel = `${Math.min(itemsCollected, totalCollectibles)} / ${totalCollectibles}`;
 
   useEffect(() => {
     return () => {
@@ -166,6 +264,7 @@ export default function App() {
       if (closeSettingsTimeout) clearTimeout(closeSettingsTimeout);
       if (closeHelpTimeout) clearTimeout(closeHelpTimeout);
       if (closeCoinsTimeout) clearTimeout(closeCoinsTimeout);
+      if (noticeTimeoutRef.current) clearTimeout(noticeTimeoutRef.current);
     };
   }, [closeMenuTimeout, closeSettingsTimeout, closeHelpTimeout, closeCoinsTimeout]);
 
@@ -180,11 +279,24 @@ export default function App() {
       if (stored) {
         const parsed = JSON.parse(stored);
         if (parsed?.username) {
-          setUser(parsed);
-          return;
-        }
+        const bestFromStore = Number.isFinite(parsed.login_best)
+          ? parsed.login_best
+          : Number.isFinite(parsed.login_streak)
+            ? parsed.login_streak
+            : 1;
+        const tasksCheckedOff = Number.isFinite(parsed.tasks_checked_off) ? parsed.tasks_checked_off : 0;
+        const tasksCheckedOffToday = Number.isFinite(parsed.tasks_checked_off_today)
+          ? parsed.tasks_checked_off_today
+          : 0;
+        const xp = Number.isFinite(parsed.xp) ? parsed.xp : 0;
+        const level = Number.isFinite(parsed.level) ? parsed.level : 1;
+        const rank = parsed.rank || "Task Trainee";
+        setUser({ login_best: bestFromStore, tasks_checked_off: tasksCheckedOff, tasks_checked_off_today: tasksCheckedOffToday, xp, level, rank, ...parsed });
+        syncUnlockedFromInventory(parsed.inventory, parsed.id, level);
+        return;
       }
-    } catch (err) {
+    }
+  } catch (err) {
       console.warn("Failed to load stored user", err);
     }
     setAuthModalOpen(true);
@@ -199,10 +311,22 @@ export default function App() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ username: user.username, password: user.password })
         });
-        const withSecret = { ...data, password: user.password };
+        const inventory = parseInventory(data.inventory);
+        const withSecret = {
+          ...data,
+          login_best: Number.isFinite(data.login_best) ? data.login_best : user.login_best ?? user.login_streak ?? 1,
+          tasks_checked_off: Number.isFinite(data.tasks_checked_off) ? data.tasks_checked_off : user.tasks_checked_off ?? 0,
+          tasks_checked_off_today: Number.isFinite(data.tasks_checked_off_today) ? data.tasks_checked_off_today : user.tasks_checked_off_today ?? 0,
+          password: user.password,
+          inventory,
+          xp: Number.isFinite(data.xp) ? data.xp : user.xp ?? 0,
+          level: Number.isFinite(data.level) ? data.level : user.level ?? 1,
+          rank: data.rank || user.rank || "Task Trainee"
+        };
         setUser(withSecret);
         setCheckCoins(withSecret.check_coins || 0);
         localStorage.setItem("authUser", JSON.stringify(withSecret));
+        syncUnlockedFromInventory(inventory, withSecret?.id, withSecret.level);
         refreshedUserRef.current = true;
       } catch (err) {
         console.warn("Could not refresh user session", err);
@@ -222,6 +346,9 @@ export default function App() {
       queriesFaqOpen ||
       queriesSupportOpen ||
       checkStoreOpen ||
+      purchasePrompt ||
+      confirmLogoutOpen ||
+      lockedPromptOpen ||
       coinsInfoOpen ||
       authModalOpen ||
       !user;
@@ -246,6 +373,7 @@ export default function App() {
     queriesFaqOpen,
     queriesSupportOpen,
     checkStoreOpen,
+    lockedPromptOpen,
     coinsInfoOpen,
     authModalOpen,
     user
@@ -272,13 +400,13 @@ export default function App() {
   }, [selectedListId, selected]);
 
   useEffect(() => {
-    loadSettings();
-  }, []);
+    loadSettings(user?.id);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!settingsReady) return;
-    saveSettings(theme, view, selectedListId);
-  }, [theme, view, selectedListId, settingsReady]);
+    saveSettings(theme, view, selectedListId, user?.id);
+  }, [theme, view, selectedListId, settingsReady, user?.id]);
 
   useEffect(() => {
     if (selectedListId) {
@@ -299,12 +427,79 @@ export default function App() {
 
   const dateOptions = useMemo(() => generateDateOptions(45), []);
   const timeOptions = useMemo(() => generateTimeOptions(), []);
+  const isFootballTheme = theme === "football";
+  const SettingsGlyph = isFootballTheme ? PiSoccerBall : SettingsIcon;
+  const heroSubtitle = isFootballTheme ? "How many goals are we scoring today?" : "What are we checking off today?";
 
   const getTaskNameById = (id) => todos.find((t) => t.id === id)?.text || null;
-
-  async function loadSettings() {
+  const unlockedStorageKey = user?.id ? `unlockedThemes:${user.id}` : "unlockedThemes";
+  const syncUnlockedFromInventory = (inventory = [], userId = user?.id, level = userLevel) => {
+    const storageKey = userId ? `unlockedThemes:${userId}` : unlockedStorageKey;
+    const inventoryList = parseInventory(inventory);
+    let stored = [];
     try {
-      const data = await api.json(api.url("/settings"));
+      const raw = localStorage.getItem(storageKey);
+      const parsed = raw ? JSON.parse(raw) : [];
+      stored = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      stored = [];
+    }
+    const levelUnlocked = getLevelUnlockedThemes(level);
+    const merged = Array.from(new Set([...baseUnlockedThemes, ...stored, ...inventoryList, ...levelUnlocked]));
+    const filtered = filterThemesByLevel(merged, level);
+    setUnlockedThemes(filtered);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(filtered));
+    } catch {
+      // ignore storage failures
+    }
+    return filtered;
+  };
+  const handleLockedAttempt = () => {
+    setLockedPromptOpen(true);
+  };
+
+  const showNotice = (message) => {
+    setNotice(message);
+    if (noticeTimeoutRef.current) clearTimeout(noticeTimeoutRef.current);
+    noticeTimeoutRef.current = setTimeout(() => setNotice(null), 4000);
+  };
+
+  useEffect(() => {
+    try {
+      syncUnlockedFromInventory(user?.inventory, user?.id, userLevel);
+    } catch (err) {
+      console.warn("Failed to load unlocked themes", err);
+      setUnlockedThemes(filterThemesByLevel(baseUnlockedThemes, userLevel));
+    }
+  }, [unlockedStorageKey, user?.inventory, userLevel]);
+
+  useEffect(() => {
+    if (!user) return;
+    const inventoryList = parseInventory(user.inventory);
+    const levelUnlocked = getLevelUnlockedThemes(userLevel);
+    const missing = levelUnlocked.filter((key) => !inventoryList.includes(key));
+    if (missing.length === 0) return;
+    const updatedInventory = [...inventoryList, ...missing];
+    const updatedUser = { ...user, inventory: updatedInventory };
+    setUser(updatedUser);
+    localStorage.setItem("authUser", JSON.stringify(updatedUser));
+    syncUnlockedFromInventory(updatedInventory, updatedUser.id, userLevel);
+  }, [user, userLevel]);
+
+  useEffect(() => {
+    if (!unlockedThemes.includes(theme)) {
+      const fallback = baseUnlockedThemes[0] || "default";
+      setTheme(fallback);
+    }
+  }, [theme, unlockedThemes]);
+
+  async function loadSettings(userId) {
+    try {
+      const params = new URLSearchParams();
+      if (userId) params.append("user_id", userId);
+      const path = params.toString() ? `/settings?${params.toString()}` : "/settings";
+      const data = await api.json(api.url(path));
       setTheme(data.theme || "default");
       setView(data.view || "front");
       if (data.selected_list_id) {
@@ -318,12 +513,12 @@ export default function App() {
     }
   }
 
-  async function saveSettings(nextTheme, nextView, nextSelectedListId) {
+  async function saveSettings(nextTheme, nextView, nextSelectedListId, userId) {
     try {
       await api.json(api.url("/settings"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ theme: nextTheme, view: nextView, selected_list_id: nextSelectedListId })
+        body: JSON.stringify({ theme: nextTheme, view: nextView, selected_list_id: nextSelectedListId, user_id: userId })
       });
     } catch (err) {
       console.error("Failed to save settings", err);
@@ -332,6 +527,100 @@ export default function App() {
 
   const changeView = (nextView) => {
     setView(nextView);
+  };
+
+  const handleThemePurchase = async () => {
+    if (!purchasePrompt) return;
+    const themeKey = purchasePrompt.key;
+    const item = themeStoreItems.find((entry) => entry.key === themeKey);
+    if (!item) return;
+    if (item.unlockLevel && userLevel < item.unlockLevel) {
+      showNotice(`Reach level ${item.unlockLevel} to unlock ${item.label}.`);
+      setPurchasePrompt(null);
+      return;
+    }
+    if (item.purchasable === false) {
+      showNotice(`${item.label} unlocks automatically at level ${item.unlockLevel || ""}.`);
+      setPurchasePrompt(null);
+      return;
+    }
+    if (!user?.id) {
+      showNotice("Please sign in to purchase themes.");
+      return;
+    }
+    if (unlockedThemes.includes(themeKey)) {
+      showNotice(`${item.label} is already unlocked. Equip it to apply.`);
+      return;
+    }
+    if (checkCoins < item.price) {
+      showNotice("not enough check coins!");
+      setCheckStoreOpen(true);
+      setPurchasePrompt(null);
+      return;
+    }
+    try {
+      const res = await api.json(api.url("/store/purchase"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: user.id, item_key: themeKey, price: item.price })
+      });
+      const remaining = Number.isFinite(res?.check_coins) ? res.check_coins : Math.max(checkCoins - item.price, 0);
+      setCheckCoins(remaining);
+      const updatedUser = { ...user, check_coins: remaining, inventory: parseInventory(res?.inventory) };
+      setUser(updatedUser);
+      localStorage.setItem("authUser", JSON.stringify(updatedUser));
+      syncUnlockedFromInventory(updatedUser.inventory, updatedUser.id, updatedUser.level);
+      setPurchasePrompt(null);
+      showNotice(`${item.label} unlocked! Use Equip to apply.`);
+    } catch (err) {
+      let friendly = "Purchase failed";
+      if (err?.message) {
+        try {
+          const parsed = JSON.parse(err.message);
+          friendly = parsed?.detail || friendly;
+        } catch {
+          friendly = err.message;
+        }
+      }
+      showNotice(friendly);
+    }
+  };
+
+  const requestThemePurchase = (themeKey) => {
+    const item = themeStoreItems.find((entry) => entry.key === themeKey);
+    if (!item) return;
+    if (item.unlockLevel && userLevel < item.unlockLevel) {
+      showNotice(`Reach level ${item.unlockLevel} to unlock ${item.label}.`);
+      return;
+    }
+    if (item.purchasable === false) {
+      showNotice(`${item.label} unlocks automatically at level ${item.unlockLevel || ""}.`);
+      return;
+    }
+    if (!user?.id) {
+      showNotice("Please sign in to purchase themes.");
+      return;
+    }
+    if (unlockedThemes.includes(themeKey)) {
+      showNotice(`${item.label} is already unlocked. Equip it to apply.`);
+      return;
+    }
+    if (checkCoins < item.price) {
+      showNotice("not enough check coins!");
+      setCheckStoreOpen(true);
+      return;
+    }
+    setPurchasePrompt({ key: themeKey, label: item.label, price: item.price });
+  };
+
+  const handleEquipTheme = (themeKey) => {
+    if (!unlockedThemes.includes(themeKey)) {
+      showNotice("Unlock this theme before equipping it.");
+      return;
+    }
+    setTheme(themeKey);
+    const label = themes[themeKey]?.label || "Theme";
+    showNotice(`${label} equipped.`);
   };
 
   async function loadLists() {
@@ -483,13 +772,33 @@ export default function App() {
   async function toggleComplete(id, completed) {
     try {
       const params = new URLSearchParams({ id, completed, user_id: user.id });
-      await api.json(api.url(`/edit_a_todo?${params.toString()}`), { method: "PUT" });
+      const res = await api.json(api.url(`/edit_a_todo?${params.toString()}`), { method: "PUT" });
+      if (res?.user) {
+        const mergedUser = {
+          ...user,
+          tasks_checked_off: Number.isFinite(res.user.tasks_checked_off) ? res.user.tasks_checked_off : user.tasks_checked_off,
+          tasks_checked_off_today: Number.isFinite(res.user.tasks_checked_off_today) ? res.user.tasks_checked_off_today : user.tasks_checked_off_today,
+          check_coins: Number.isFinite(res.user.check_coins) ? res.user.check_coins : user.check_coins,
+          xp: Number.isFinite(res.user.xp) ? res.user.xp : user.xp,
+          level: Number.isFinite(res.user.level) ? res.user.level : user.level,
+          rank: res.user.rank || user.rank,
+          inventory: parseInventory(res.user.inventory ?? user.inventory ?? [])
+        };
+        setUser(mergedUser);
+        setCheckCoins(mergedUser.check_coins || 0);
+        localStorage.setItem("authUser", JSON.stringify(mergedUser));
+        syncUnlockedFromInventory(mergedUser.inventory, mergedUser.id, mergedUser.level);
+      }
       await loadTodos();
       if (selectedTodo?.id === id) {
         await selectTodo(id);
       }
     } catch (err) {
       console.error("Unable to update task", err);
+      const message = err?.message?.includes("cannot be unchecked")
+        ? "Completed tasks stay completed. If this was an error, you can delete and recreate the task."
+        : err?.message || "Unable to update task";
+      showNotice(message);
     }
   }
 
@@ -507,6 +816,7 @@ export default function App() {
   }
 
   async function selectTodo(id) {
+    const localFallback = todos.find((t) => t.id === id);
     try {
       const params = new URLSearchParams({ user_id: user.id });
       const todo = await api.json(api.url(`/fetch_a_todo/${id}?${params.toString()}`));
@@ -518,7 +828,17 @@ export default function App() {
       setRelatedTodos([]);
       changeView("detail");
     } catch (err) {
-      alert(`Unable to load todo: ${err.message}`);
+      console.error("Unable to load todo", err);
+      if (localFallback) {
+        if (localFallback.list_id && localFallback.list_id !== selectedListId) {
+          setSelectedListId(localFallback.list_id);
+        }
+        setSelected(localFallback);
+        changeView("detail");
+        showNotice("Showing cached task due to a load error. Try refreshing if data seems outdated.");
+      } else {
+        showNotice(`Unable to load todo: ${err?.message || "Unknown error"}`);
+      }
     }
   }
 
@@ -635,10 +955,22 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password })
       });
-      const withSecret = { ...data, password };
+      const inventory = parseInventory(data.inventory);
+      const withSecret = {
+        ...data,
+        login_best: Number.isFinite(data.login_best) ? data.login_best : data.login_streak ?? 1,
+        tasks_checked_off: Number.isFinite(data.tasks_checked_off) ? data.tasks_checked_off : 0,
+        tasks_checked_off_today: Number.isFinite(data.tasks_checked_off_today) ? data.tasks_checked_off_today : 0,
+        password,
+        inventory,
+        xp: Number.isFinite(data.xp) ? data.xp : 0,
+        level: Number.isFinite(data.level) ? data.level : 1,
+        rank: data.rank || "Task Trainee"
+      };
       setUser(withSecret);
       setCheckCoins(withSecret.check_coins || 0);
       localStorage.setItem("authUser", JSON.stringify(withSecret));
+      syncUnlockedFromInventory(inventory, withSecret?.id, withSecret.level);
       setAuthModalOpen(false);
       return withSecret;
     } catch (err) {
@@ -657,84 +989,127 @@ export default function App() {
     }
   };
 
+  const handleLogout = () => {
+    const storedUser = localStorage.getItem("authUser");
+    if (!user && !storedUser) return;
+    setUser(null);
+    setCheckCoins(0);
+    setTodos([]);
+    setLists([]);
+    setSelected(null);
+    setSelectedListId(null);
+    setSummary("Select a list to view its summary.");
+    setRecommendations("Generate ideas related to the selected task.");
+    setRelatedTodos([]);
+    localStorage.removeItem("authUser");
+    setShowSettings(false);
+    setAuthModalOpen(true);
+  };
+
   if (!user) {
     return (
-      <div className="app">
-        <AuthModal
-          open
-          mode={authMode}
-          onModeChange={(next) => {
-            setAuthMode(next);
-            setAuthError("");
-          }}
-          onSubmit={(username, password) => handleAuth(authMode, username, password)}
-          loading={authLoading}
-          error={authError}
-          onUser={(u) => {
-            setCheckCoins(u?.check_coins || 0);
-          }}
-        />
-      </div>
+      <ErrorBoundary>
+        <div className="app">
+          <AuthModal
+            open
+            mode={authMode}
+            onModeChange={(next) => {
+              setAuthMode(next);
+              setAuthError("");
+            }}
+            onSubmit={(username, password) => handleAuth(authMode, username, password)}
+            loading={authLoading}
+            error={authError}
+            onUser={(u) => {
+              setCheckCoins(u?.check_coins || 0);
+            }}
+          />
+        </div>
+      </ErrorBoundary>
     );
   }
 
   return (
-    <div className="app">
-      <div
-        className="help-launcher-stack"
-        onMouseEnter={() => {
-          if (coinsOpen) setCoinsOpen(false);
-          if (closeHelpTimeout) clearTimeout(closeHelpTimeout);
-          setHelpOpen(true);
-        }}
-        onMouseLeave={() => {
-          const timeout = setTimeout(() => setHelpOpen(false), 120);
-          setCloseHelpTimeout(timeout);
-        }}
-      >
-        <button
-          className="settings-launcher"
-          onClick={() => setHelpOpen((o) => !o)}
-          aria-label="Open help"
-          title="Help"
+    <ErrorBoundary>
+      <div className="app">
+      {notice && (
+        <div className="toast" role="status">
+          <span>{notice}</span>
+          <button className="toast-close" onClick={() => setNotice(null)} aria-label="Close notice">
+            ×
+          </button>
+        </div>
+      )}
+      <div className="help-launcher-stack">
+        <div
+          className="help-launcher-area"
+          onMouseEnter={() => {
+            if (coinsOpen) setCoinsOpen(false);
+            if (closeHelpTimeout) clearTimeout(closeHelpTimeout);
+            setHelpOpen(true);
+          }}
+          onMouseLeave={() => {
+            const timeout = setTimeout(() => setHelpOpen(false), 120);
+            setCloseHelpTimeout(timeout);
+          }}
         >
-          <HelpIcon className="gear-icon" aria-hidden="true" />
-        </button>
-        {helpOpen && (
-          <div
-            className="help-dropdown"
-            onMouseEnter={() => {
-              if (closeHelpTimeout) clearTimeout(closeHelpTimeout);
-              setHelpOpen(true);
-            }}
-            onMouseLeave={() => {
-              const timeout = setTimeout(() => setHelpOpen(false), 120);
-              setCloseHelpTimeout(timeout);
-            }}
+          <button
+            className="settings-launcher"
+            onClick={() => setHelpOpen((o) => !o)}
+            aria-label="Open help"
+            title="Help"
           >
-            <div className="dropdown-section">
-              <div className="dropdown-label">Need a hand?</div>
+            <HelpIcon className="gear-icon" aria-hidden="true" />
+          </button>
+          {helpOpen && (
+            <div
+              className="help-dropdown"
+              onMouseEnter={() => {
+                if (closeHelpTimeout) clearTimeout(closeHelpTimeout);
+                setHelpOpen(true);
+              }}
+              onMouseLeave={() => {
+                const timeout = setTimeout(() => setHelpOpen(false), 120);
+                setCloseHelpTimeout(timeout);
+              }}
+            >
+              <div className="dropdown-section">
+                <div className="dropdown-label">Need a hand?</div>
+              </div>
+              <button
+                className="nav-button full"
+                onClick={() => {
+                  setHelpOpen(false);
+                  setNavModalOpen(true);
+                }}
+              >
+                Navigation <NavigationIcon className="menu-icon" aria-hidden="true" />
+              </button>
+              <button
+                className="nav-button full"
+                onClick={() => {
+                  setHelpOpen(false);
+                  setQueriesModalOpen(true);
+                }}
+              >
+                Queries <QueryIcon className="menu-icon" aria-hidden="true" />
+              </button>
             </div>
-            <button
-              className="nav-button full"
-              onClick={() => {
-                setHelpOpen(false);
-                setNavModalOpen(true);
-              }}
-            >
-              Navigation <NavigationIcon className="menu-icon" aria-hidden="true" />
-            </button>
-            <button
-              className="nav-button full"
-              onClick={() => {
-                setHelpOpen(false);
-                setQueriesModalOpen(true);
-              }}
-            >
-              Queries <QueryIcon className="menu-icon" aria-hidden="true" />
-            </button>
-          </div>
-        )}
+          )}
+        </div>
+        <button
+          className="shop-button"
+          type="button"
+          onClick={() => {
+            setHelpOpen(false);
+            setCoinsOpen(false);
+            setCheckStoreOpen(true);
+          }}
+          aria-label="Open shop"
+          title="Shop"
+        >
+          <ShoppingCart size={16} aria-hidden="true" />
+        </button>
         <div
           className="coins-wrapper"
           onMouseEnter={() => {
@@ -860,7 +1235,7 @@ export default function App() {
                 aria-label="Open settings"
                 title="Settings"
               >
-                <SettingsIcon className="gear-icon" aria-hidden="true" />
+                <SettingsGlyph className="gear-icon" aria-hidden="true" />
               </button>
               {settingsHoverOpen && (
                 <div className="settings-dropdown">
@@ -876,30 +1251,40 @@ export default function App() {
                         <span className="dropdown-theme-label">Theme</span>
                         <span className="dropdown-theme-current">{themes[theme]?.label}</span>
                       </button>
-                      {settingsThemeOpen && (
-                        <div className="dropdown-theme-options" role="listbox">
-                          {Object.entries(themes).map(([key, info]) => (
-                            <button
-                              key={key}
-                              className={`dropdown-theme-option ${theme === key ? "active" : ""}`}
-                              onClick={() => {
-                                setTheme(key);
-                              }}
-                              role="option"
-                            >
-                              <span
-                                className="theme-chip"
-                                style={{ background: themePreviews[key]?.bg, borderColor: themePreviews[key]?.border }}
-                              />
-                              <span>{info.label}</span>
-                            </button>
-                          ))}
+                          {settingsThemeOpen && (
+                            <div className="dropdown-theme-options" role="listbox">
+                          {Object.entries(themes).map(([key, info]) => {
+                            const locked = !unlockedThemes.includes(key);
+                            return (
+                              <button
+                                key={key}
+                                className={`dropdown-theme-option ${theme === key ? "active" : ""} ${locked ? "locked" : ""}`}
+                                onClick={() => {
+                                  if (locked) {
+                                    handleLockedAttempt();
+                                    return;
+                                  }
+                                  setTheme(key);
+                                }}
+                                role="option"
+                                aria-disabled={locked}
+                                disabled={locked}
+                              >
+                                <span
+                                  className="theme-chip"
+                                  style={{ background: themePreviews[key]?.bg, borderColor: themePreviews[key]?.border }}
+                                />
+                                {locked ? <Lock size={14} className="theme-lock" aria-hidden="true" /> : null}
+                                <span>{info.label}</span>
+                              </button>
+                            );
+                          })}
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  </div>
+                      </div>
                   <button className="nav-button full" onClick={() => setShowSettings(true)}>
-                    Open settings <SettingsIcon className="menu-icon" aria-hidden="true" />
+                    Open settings <SettingsGlyph className="menu-icon" aria-hidden="true" />
                   </button>
                   <button
                     className="nav-button full"
@@ -924,24 +1309,58 @@ export default function App() {
           <main>
             <section className={view === "front" ? "active" : ""} id="front">
               <div className="hero">
-                <div>
-                  <h2>Pick a theme, keep momentum.</h2>
-                  <p>The experience adapts across every page—front, lists, and individual items—so your flow and task outlines stay consistent.</p>
-                  <div className="cta-buttons">
-                    <button className="button" onClick={() => changeView("lists")}>Open my lists</button>
+                <h2 className="hero-title">Welcome, {user?.username || "friend"}!</h2>
+                <p className="hero-subtitle">{heroSubtitle}</p>
+              </div>
+              <div className="tasks-summary">
+                <div className="panel tasks-card">
+                  <label className="muted" style={{ display: "block", marginBottom: "6px", fontSize: "15px" }}>Tasks checked off</label>
+                  <div className="tasks-count">{tasksCheckedOff}</div>
+                </div>
+                <div className="panel tasks-card">
+                  <label className="muted" style={{ display: "block", marginBottom: "6px", fontSize: "15px" }}>Tasks checked off today</label>
+                  <div className="tasks-count">{tasksCheckedOffToday}</div>
+                </div>
+              </div>
+              <div className="panel xp-card">
+                <div className="xp-header">
+                  <div className="xp-label">
+                    <Sparkles size={18} />
+                    <span>XP Progress</span>
                   </div>
-                  <div className="panel-grid">
-                    <div className="panel">
-                      <h3>Consistent visuals</h3>
-                      <p>Once you choose a theme it persists everywhere until you switch.</p>
-                    </div>
-                    <div className="panel">
-                      <h3>Task outlines</h3>
-                      <p>Cards use theme-colored borders to keep your list readable at a glance.</p>
-                    </div>
+                  <span className="xp-percent">{xpProgress}%</span>
+                </div>
+                <div className="xp-bar" aria-label="XP progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={xpProgress}>
+                  <div className="xp-bar-fill" style={{ width: `${xpProgress}%` }} />
+                </div>
+                <div className="xp-level">
+                  <Crown size={18} />
+                  <span>Level {userLevel}</span>
+                </div>
+                <div className="xp-rank">
+                  <span className="xp-rank-label">Rank</span>
+                  <span className="xp-rank-value">{userRank}</span>
+                </div>
+                <div className="xp-rank">
+                  <span className="xp-rank-label">Items collected</span>
+                  <span className="xp-rank-value">{itemsCollectedLabel}</span>
+                </div>
+              </div>
+              <div className="front-streak">
+                <div className="panel streak-card">
+                  <label className="muted" style={{ display: "block", marginBottom: "6px" }}>Login streak</label>
+                  <div style={{ fontWeight: 700, fontSize: "16px", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span>{loginStreak} day{loginStreak === 1 ? "" : "s"}</span>
+                    <Flame size={18} color="var(--accent)" />
                   </div>
                 </div>
-                <ThemeScene theme={theme} />
+                <div className="panel streak-card">
+                  <label className="muted" style={{ display: "block", marginBottom: "6px" }}>Best login streak</label>
+                  <div style={{ fontWeight: 700, fontSize: "16px", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span>{loginBest} day{loginBest === 1 ? "" : "s"}</span>
+                    <Flame size={18} color="var(--accent)" />
+                  </div>
+                </div>
               </div>
             </section>
 
@@ -961,10 +1380,10 @@ export default function App() {
                   />
                 ))}
               </div>
-              <div className="panel create-list-panel" style={{ marginTop: "16px" }}>
-                <h3>Create a list</h3>
-                <form onSubmit={createList}>
-                  <input name="listName" type="text" placeholder="List name" required />
+              <div className="panel create-list-panel">
+                <form className="create-list-form" onSubmit={createList}>
+                  <label className="create-list-label" htmlFor="listName">Create a list</label>
+                  <input id="listName" name="listName" type="text" placeholder="List name" required />
                   <button type="submit" className="button">Add list</button>
                 </form>
               </div>
@@ -1053,7 +1472,7 @@ export default function App() {
                             </div>
                             <div className="actions">
                               <button className="button secondary" onClick={loadRecommendations}>Recommendations</button>
-                              <button className="button secondary" onClick={loadRelated}>Fetch related</button>
+                              <button className="button secondary" onClick={loadRelated}>Show related tasks</button>
                             </div>
                           </div>
                           <EditPanel title="Update text" label="New text" defaultValue={selectedTodo.text} onSave={saveText} />
@@ -1112,6 +1531,9 @@ export default function App() {
         setTheme={setTheme}
         user={user}
         setUser={setUser}
+        unlockedThemes={unlockedThemes}
+        onLockedThemeAttempt={handleLockedAttempt}
+        onLogout={() => setConfirmLogoutOpen(true)}
       />
 
       <DeleteModal
@@ -1167,7 +1589,54 @@ export default function App() {
         }}
         loginStreak={user?.login_streak || 0}
       />
-      <CheckStoreModal open={checkStoreOpen} onClose={() => setCheckStoreOpen(false)} />
+      <ConfirmModal
+        className="confirm"
+        open={confirmLogoutOpen}
+        title="Log out?"
+        message="Log out of your account?"
+        confirmLabel="Log out"
+        cancelLabel="Stay signed in"
+        destructive
+        onCancel={() => setConfirmLogoutOpen(false)}
+        onConfirm={() => {
+          setConfirmLogoutOpen(false);
+          handleLogout();
+        }}
+      />
+      <ConfirmModal
+        className="confirm"
+        open={Boolean(purchasePrompt)}
+        title="Confirm purchase"
+        message={
+          purchasePrompt
+            ? `Buy ${purchasePrompt.label} for ${purchasePrompt.price} check coins?`
+            : ""
+        }
+        confirmLabel="Buy"
+        cancelLabel="Cancel"
+        destructive
+        onCancel={() => setPurchasePrompt(null)}
+        onConfirm={() => handleThemePurchase()}
+      />
+      <CheckStoreModal
+        open={checkStoreOpen}
+        onClose={() => setCheckStoreOpen(false)}
+        coins={checkCoins}
+        items={themeStoreItems}
+        onPurchase={requestThemePurchase}
+        unlockedThemes={unlockedThemes}
+        currentTheme={theme}
+        userLevel={userLevel}
+        onEquip={handleEquipTheme}
+      />
+      <LockedItemModal
+        open={lockedPromptOpen}
+        onClose={() => setLockedPromptOpen(false)}
+        onOpenShop={() => {
+          setLockedPromptOpen(false);
+          setCheckStoreOpen(true);
+        }}
+      />
       <AuthModal
         open={authModalOpen || !user}
         mode={authMode}
@@ -1180,6 +1649,7 @@ export default function App() {
         error={authError}
       />
     </div>
+    </ErrorBoundary>
   );
 }
 
@@ -1265,6 +1735,20 @@ function DeadlinePicker({ title, dateOptions, timeOptions, currentDeadline, onSa
   );
 }
 
+function FlagStack({ count = 0 }) {
+  const safeCount = Number.isFinite(count) ? count : 0;
+  if (safeCount <= 0) return null;
+  const dots = Math.min(safeCount, 3);
+  return (
+    <div className="flag-stack" aria-label={`${safeCount} flag${safeCount === 1 ? "" : "s"}`}>
+      {Array.from({ length: dots }).map((_, idx) => (
+        <span key={idx} className="flag-dot" aria-hidden="true" />
+      ))}
+      <span className="flag-count">{safeCount}</span>
+    </div>
+  );
+}
+
 function CollapsibleTask({ todo, relatedLabel, onOpen, onDelete, formatDeadline, onToggleComplete, onFlagChange }) {
   const [open, setOpen] = useState(false);
   const hasRelated = !!todo.related_id;
@@ -1297,8 +1781,8 @@ function CollapsibleTask({ todo, relatedLabel, onOpen, onDelete, formatDeadline,
             value={flags}
             onChange={(next) => onFlagChange(todo.id, next)}
           />
-          <button className="button secondary" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Open</button>
-          <button className="ghost" onClick={(e) => { e.stopPropagation(); onDelete(); }}>Delete</button>
+          <button className="button secondary action-uniform" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Open</button>
+          <button className="ghost action-uniform" onClick={(e) => { e.stopPropagation(); onDelete(); }}>Delete</button>
         </div>
       )}
     </article>
@@ -1338,7 +1822,7 @@ function CollapsibleList({ list, isSelected, onOpen, onRename, onDelete, onSumma
   );
 }
 
-function SettingsPanel({ open, onClose, theme, setTheme, user, setUser }) {
+function SettingsPanel({ open, onClose, theme, setTheme, user, setUser, unlockedThemes = [], onLockedThemeAttempt, onLogout }) {
   if (!open) return null;
   const [openSelect, setOpenSelect] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -1373,25 +1857,46 @@ function SettingsPanel({ open, onClose, theme, setTheme, user, setUser }) {
           </button>
           {openSelect && (
             <div className="theme-options" role="listbox">
-              {Object.entries(themes).map(([key, info]) => (
-                <button
-                  key={key}
-                  className={`theme-option ${theme === key ? "active" : ""}`}
-                  role="option"
-                  onClick={() => chooseTheme(key)}
-                >
-                  <span
-                    className="theme-chip"
-                    style={{ background: themePreviews[key]?.bg, borderColor: themePreviews[key]?.border }}
-                  />
-                  <span>{info.label}</span>
-                </button>
-              ))}
+              {Object.entries(themes).map(([key, info]) => {
+                const locked = !unlockedThemes.includes(key);
+                return (
+                  <button
+                    key={key}
+                    className={`theme-option ${theme === key ? "active" : ""} ${locked ? "locked" : ""}`}
+                    role="option"
+                    aria-disabled={locked}
+                    disabled={locked}
+                    onClick={() => {
+                      if (locked) {
+                        if (onLockedThemeAttempt) onLockedThemeAttempt();
+                        return;
+                      }
+                      chooseTheme(key);
+                    }}
+                  >
+                    <span
+                      className="theme-chip"
+                      style={{ background: themePreviews[key]?.bg, borderColor: themePreviews[key]?.border }}
+                    />
+                    {locked ? <Lock size={14} className="theme-lock" aria-hidden="true" /> : null}
+                    <span>{info.label}</span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
       </div>
-      <ProfileModal open={profileOpen} onClose={() => setProfileOpen(false)} user={user} setUser={setUser} />
+      <ProfileModal
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        user={user}
+        setUser={setUser}
+        onLogout={() => {
+          setProfileOpen(false);
+          if (onLogout) onLogout();
+        }}
+      />
     </div>
   );
 }
@@ -1451,6 +1956,55 @@ function DeleteModal({ todo, onConfirm, onCancel }) {
         <p>Are you sure you want to delete “{todo.text}”?</p>
         <div className="modal-actions">
           <button className="button" onClick={onConfirm}>Yes, delete</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmModal({
+  className = "",
+  open,
+  title = "Are you sure?",
+  message = "",
+  confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
+  destructive = false,
+  onConfirm,
+  onCancel
+}) {
+  if (!open) return null;
+  return (
+    <div className={`modal ${className}`.trim()}>
+      <div className="modal-backdrop" onClick={onCancel} aria-hidden="true"></div>
+      <div className="modal-content" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <button
+          onClick={onCancel}
+          aria-label="Close"
+          style={{
+            position: "absolute",
+            top: "12px",
+            right: "12px",
+            background: "none",
+            border: "none",
+            fontSize: "18px",
+            cursor: "pointer",
+            color: "var(--muted)",
+            padding: "8px",
+            lineHeight: 1
+          }}
+        >
+          ✕
+        </button>
+        <h3 id="confirm-title" style={{ marginTop: 0 }}>{title}</h3>
+        {message ? <p className="muted" style={{ marginTop: "4px" }}>{message}</p> : null}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "18px" }}>
+          <button type="button" className="button secondary" onClick={onCancel}>
+            {cancelLabel}
+          </button>
+          <button type="button" className={`button ${destructive ? "danger" : ""}`} onClick={onConfirm}>
+            {confirmLabel}
+          </button>
         </div>
       </div>
     </div>
@@ -1607,35 +2161,6 @@ function GetStartedModal({ open, onClose }) {
   );
 }
 
-function FlagIcon({ filled }) {
-  return (
-    <svg className={`flag-icon ${filled ? "filled" : ""}`} viewBox="0 0 24 24" role="img" aria-hidden="true">
-      <path
-        d="M6 4v16m0-13.5c1.2-.5 2.8-1.2 4-1.2 2 0 3.3 1.4 4.8 1.4 1 0 2.2-.4 3.2-.9v8c-1 .5-2.2.9-3.2.9-1.5 0-2.8-1.4-4.8-1.4-1.2 0-2.8.7-4 1.2"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function FlagStack({ count, max = 3, showEmpty = false }) {
-  const total = showEmpty ? max : count;
-  if (total <= 0) {
-    return <div className="flag-stack" aria-label="0 flags" />;
-  }
-  return (
-    <div className="flag-stack" aria-label={`${count} flag${count === 1 ? "" : "s"}`}>
-      {Array.from({ length: total }).map((_, idx) => (
-        <FlagIcon key={idx} filled={idx < count} />
-      ))}
-    </div>
-  );
-}
-
 function FlagControl({ value, onChange }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -1660,12 +2185,12 @@ function FlagControl({ value, onChange }) {
       onClick={(e) => e.stopPropagation()}
     >
       <button
-        className="flag-trigger"
+        className="flag-trigger action-uniform"
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
-        <FlagStack count={safeValue} showEmpty />
+        <span className="flag-text">Priority</span>
       </button>
       {open && (
         <div className="flag-menu" role="listbox">
@@ -1680,8 +2205,7 @@ function FlagControl({ value, onChange }) {
                 setOpen(false);
               }}
             >
-              <FlagStack count={count} showEmpty />
-              <span className="flag-label">{count === 1 ? "1 flag" : `${count} flags`}</span>
+              <span className="flag-label">{count === 0 ? "No priority" : `${count} flag${count === 1 ? "" : "s"}`}</span>
             </button>
           ))}
         </div>
@@ -1941,7 +2465,7 @@ const parseApiError = (err, fallback) => {
   return fallback;
 };
 
-function ProfileModal({ open, onClose, user, setUser }) {
+function ProfileModal({ open, onClose, user, setUser, onLogout }) {
   const [showPassword, setShowPassword] = useState(false);
   const [usernameModalOpen, setUsernameModalOpen] = useState(false);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
@@ -1959,6 +2483,11 @@ function ProfileModal({ open, onClose, user, setUser }) {
     setUsernameModalOpen(false);
     setPasswordModalOpen(false);
     onClose();
+  };
+
+  const handleLogoutClick = () => {
+    handleCloseAll();
+    if (onLogout) onLogout();
   };
 
   if (!open) return null;
@@ -2026,13 +2555,6 @@ function ProfileModal({ open, onClose, user, setUser }) {
           <h3 id="profile-modal-title" style={{ textAlign: "center", marginBottom: "12px" }}>
             My Profile
           </h3>
-          <div className="panel streak-card" style={{ marginTop: "8px" }}>
-            <label className="muted" style={{ display: "block", marginBottom: "6px" }}>Login streak</label>
-            <div style={{ fontWeight: 700, fontSize: "16px", display: "flex", alignItems: "center", gap: "6px" }}>
-              <span>{loginStreak} day{loginStreak === 1 ? "" : "s"}</span>
-              <Flame size={18} color="var(--accent)" />
-            </div>
-          </div>
           <div className="panel" style={{ marginTop: "8px" }}>
             <label className="muted" style={{ display: "block", marginBottom: "6px" }}>Username</label>
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
@@ -2063,6 +2585,24 @@ function ProfileModal({ open, onClose, user, setUser }) {
                 <button className="button" type="button" onClick={() => setPasswordModalOpen(true)}>Change password</button>
               </div>
             </div>
+          </div>
+          <div
+            className="panel"
+            style={{
+              marginTop: "14px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "10px"
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 600 }}>Log out</div>
+              <div className="muted">You will need to sign back in to access your tasks.</div>
+            </div>
+            <button type="button" className="button danger" onClick={handleLogoutClick}>
+              Log out
+            </button>
           </div>
         </div>
       </div>
@@ -2316,6 +2856,13 @@ function UpdatePasswordModal({ open, onClose, user, setUser, onHidePassword }) {
 }
 function CoinsInfoModal({ open, onClose, onOpenStore, loginStreak = 0 }) {
   if (!open) return null;
+  const milestones = [
+    { key: "daily", title: "Daily check-in", detail: "+10 coins every time your streak increases", pill: "+10/day", threshold: 1 },
+    { key: "streak5", title: "5-day streak", detail: "Bonus when you hit 5 days", pill: "+20 bonus", threshold: 5 },
+    { key: "streak10", title: "10-day streak", detail: "Bonus when you hit 10 days", pill: "+50 bonus", threshold: 10 },
+    { key: "streak20", title: "20-day streak", detail: "Bonus when you hit 20 days", pill: "+100 bonus", threshold: 20 },
+    { key: "streak50", title: "50-day streak", detail: "Bonus when you hit 50 days", pill: "+300 bonus", threshold: 50 }
+  ];
   return (
     <div className="modal">
       <div className="modal-backdrop" onClick={onClose} aria-hidden="true"></div>
@@ -2382,13 +2929,28 @@ function CoinsInfoModal({ open, onClose, onOpenStore, loginStreak = 0 }) {
           </div>
         </div>
         <div className="panel" style={{ marginTop: "8px", background: "var(--panel)", padding: "14px 16px", lineHeight: 1.6, border: "1px solid var(--accent-soft)", boxShadow: "0 12px 30px rgba(15, 23, 42, 0.12)" }}>
-          <div style={{ fontWeight: 700, marginBottom: "6px", color: "var(--text)" }}>Earning rules</div>
-          <ul className="coins-info-list" style={{ margin: 0, paddingLeft: "18px" }}>
-            <li><strong>+10 coins</strong> each time your daily login streak increases.</li>
-            <li><strong>+20 bonus coins</strong> when you reach a 5-day streak milestone.</li>
-            <li><strong>+50 bonus coins</strong> when you hit a 10-day streak milestone.</li>
-            <li>Stay active daily to keep the streak growing and earn more.</li>
-          </ul>
+          <div style={{ fontWeight: 700, marginBottom: "10px", color: "var(--text)" }}>Milestones timeline</div>
+          <div className="coins-timeline">
+            {milestones.map((item, idx) => {
+              const active = loginStreak >= item.threshold;
+              const isLast = idx === milestones.length - 1;
+              return (
+                <div key={item.key} className={`coins-timeline-item ${active ? "active" : ""}`}>
+                  <div className="coins-timeline-track">
+                    <span className="coins-timeline-dot" aria-hidden="true" />
+                    {!isLast && <span className="coins-timeline-line" aria-hidden="true" />}
+                  </div>
+                  <div className="coins-timeline-content">
+                    <div className="coins-timeline-header">
+                      <span className="coins-timeline-title">{item.title}</span>
+                      <span className="coins-timeline-pill">{item.pill}</span>
+                    </div>
+                    <div className="coins-timeline-detail">{item.detail}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
         <div className="modal-actions" style={{ marginTop: "18px", justifyContent: "center" }}>
           <button
@@ -2404,7 +2966,17 @@ function CoinsInfoModal({ open, onClose, onOpenStore, loginStreak = 0 }) {
     </div>
   );
 }
-function CheckStoreModal({ open, onClose }) {
+function CheckStoreModal({
+  open,
+  onClose,
+  coins = 0,
+  items = [],
+  onPurchase,
+  unlockedThemes = [],
+  currentTheme,
+  onEquip,
+  userLevel = 1
+}) {
   if (!open) return null;
   return (
     <div className="modal">
@@ -2437,15 +3009,111 @@ function CheckStoreModal({ open, onClose }) {
         <h3 id="check-store-title" style={{ textAlign: "center", marginBottom: "8px", fontSize: "22px" }}>
           Check Store
         </h3>
-        <p className="muted" style={{ textAlign: "center", margin: "0 0 18px" }}>
-          Spend your check coins on boosts and rewards (coming soon).
+        <p className="muted" style={{ textAlign: "center", margin: "0 0 12px" }}>
+          Spend your check coins on exclusive themes. Some unlock automatically when you reach new levels.
         </p>
-        <div className="panel" style={{ padding: "14px 16px", background: "var(--panel)", lineHeight: 1.6, border: "1px solid var(--accent-soft)" }}>
-          <ul style={{ margin: 0, paddingLeft: "18px" }}>
-            <li>Daily streak boosters and themed lists.</li>
-            <li>Custom icons and backgrounds for your tasks.</li>
-            <li>Priority tips to level up your productivity.</li>
-          </ul>
+        <div className="panel" style={{ padding: "12px", background: "var(--panel)", border: "1px solid var(--accent-soft)", display: "grid", gap: "10px" }}>
+          {items.map((item) => (
+            <div
+              key={item.key}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr auto",
+                gap: "10px",
+                alignItems: "center",
+                padding: "10px 12px",
+                borderRadius: "10px",
+                border: "1px solid color-mix(in srgb, var(--accent-soft) 60%, var(--panel) 40%)",
+                background: "color-mix(in srgb, var(--panel) 92%, var(--accent-soft) 8%)"
+              }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: 700, color: "var(--text)" }}>
+                  <span>{item.label} (theme)</span>
+                  <span
+                    className="theme-chip"
+                    aria-hidden="true"
+                    style={{
+                      background: themePreviews[item.key]?.bg,
+                      borderColor: themePreviews[item.key]?.border,
+                      width: "28px",
+                      height: "28px"
+                    }}
+                  />
+                </div>
+                <div className="muted" style={{ fontSize: "13px" }}>{item.description}</div>
+                {item.unlockLevel ? (
+                  <div className="muted" style={{ fontSize: "12px" }}>
+                    Unlocks at level {item.unlockLevel} {item.purchasable === false ? "(auto-unlocks)" : ""}
+                  </div>
+                ) : null}
+              </div>
+              {(() => {
+                const unlocked = unlockedThemes.includes(item.key);
+                const lockedByLevel = item.unlockLevel && userLevel < item.unlockLevel;
+                const purchasable = item.purchasable !== false;
+                const buttonDisabled = currentTheme === item.key || (!unlocked && (!purchasable || lockedByLevel));
+                let buttonLabel = `Buy for ${item.price} CC`;
+                if (unlocked) {
+                  buttonLabel = currentTheme === item.key ? "Equipped" : "Equip";
+                } else if (!purchasable) {
+                  buttonLabel = lockedByLevel ? `Reach level ${item.unlockLevel}` : "Unlocking...";
+                } else if (lockedByLevel) {
+                  buttonLabel = `Reach level ${item.unlockLevel}`;
+                }
+                return (
+                  <button
+                    className={`button secondary ${currentTheme === item.key ? "active" : ""}`}
+                    type="button"
+                    onClick={async () => {
+                      if (unlocked) {
+                        if (currentTheme === item.key) return;
+                        if (onEquip) onEquip(item.key);
+                        return;
+                      }
+                      if (!purchasable || lockedByLevel) return;
+                      if (onPurchase) {
+                        await onPurchase(item.key);
+                      }
+                    }}
+                    style={{ minWidth: "150px" }}
+                    disabled={buttonDisabled}
+                  >
+                    {buttonLabel}
+                  </button>
+                );
+              })()}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LockedItemModal({ open, onClose, onOpenShop }) {
+  if (!open) return null;
+  return (
+    <div className="modal">
+      <div className="modal-backdrop" onClick={onClose} aria-hidden="true"></div>
+      <div
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="locked-title"
+        style={{ width: "min(360px, 92vw)" }}
+      >
+        <h3 id="locked-title" style={{ textAlign: "center", marginBottom: "8px" }}>item avaliable in shop</h3>
+        <p className="muted" style={{ textAlign: "center", margin: "0 0 12px" }}>
+          Unlock this theme from the Check Store.
+        </p>
+        <div className="modal-actions" style={{ justifyContent: "center" }}>
+          <button className="button" type="button" onClick={onOpenShop} style={{ minWidth: "120px" }}>
+            Shop
+          </button>
+          <button className="button secondary" type="button" onClick={onClose} style={{ minWidth: "120px" }}>
+            Close
+          </button>
         </div>
       </div>
     </div>

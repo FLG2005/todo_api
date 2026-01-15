@@ -1,5 +1,6 @@
 import os
 import hashlib
+import json
 from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,6 +40,11 @@ from database import (
     update_user_username,
     update_user_password,
     update_user_login_meta,
+    increment_tasks_checked_off,
+    update_user_theme_view,
+    update_user_balance_and_inventory,
+    fetch_user_stats,
+    rank_for_level,
 )
 
 
@@ -69,6 +75,7 @@ class SettingsPayload(BaseModel):
     theme: str
     view: str
     selected_list_id: int | None = None
+    user_id: int | None = None
 
 
 class AuthPayload(BaseModel):
@@ -86,6 +93,11 @@ class UpdatePasswordPayload(BaseModel):
     user_id: int
     current_password: str
     new_password: str
+
+class PurchasePayload(BaseModel):
+    user_id: int
+    item_key: str
+    price: int
 
 
 def normalize_username(username: str) -> str:
@@ -149,6 +161,20 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
+def parse_inventory(raw_inventory) -> list[str]:
+    """Normalize stored inventory payload into a list of item keys."""
+    if isinstance(raw_inventory, list):
+        return [str(item) for item in raw_inventory if item is not None]
+    if isinstance(raw_inventory, str):
+        try:
+            parsed = json.loads(raw_inventory)
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed if item is not None]
+        except Exception:
+            return []
+    return []
+
+
 def ensure_user(user_id: int):
     if not user_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user_id is required")
@@ -210,7 +236,20 @@ def signup(payload: AuthPayload, db=Depends(get_db)):
     try:
         user_id = add_user(db, username, hash_password(password))
         ensure_user_default_list(db, user_id)
-        return {"id": user_id, "username": username, "login_streak": 1, "check_coins": 10}
+        return {
+            "id": user_id,
+            "username": username,
+            "login_streak": 1,
+            "login_best": 1,
+            "tasks_checked_off": 0,
+            "check_coins": 10,
+            "theme": "default",
+            "view": "front",
+            "inventory": [],
+            "xp": 0,
+            "level": 1,
+            "rank": "Task Trainee"
+        }
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -234,46 +273,85 @@ def login(payload: AuthPayload, db=Depends(get_db)):
     today = datetime.utcnow().date()
     existing_streak = user.get("login_streak") or 0
     existing_coins = user.get("check_coins") or 0
+    best_streak = user.get("login_best") or 1
+    tasks_checked_off = user.get("tasks_checked_off") or 0
+    tasks_checked_off_today = user.get("tasks_checked_off_today") or 0
+    tasks_checked_off_date = user.get("tasks_checked_off_date")
+    inventory = parse_inventory(user.get("inventory"))
     last_login_str = user.get("last_login")
     new_streak = 1
     coins_earned = 0
     streak_increment = 0
-    # Backfill coins if streak already reflects more days than coins awarded (e.g., manual edits)
-    def minimum_coins_for_streak(streak: int) -> int:
-        base = max(streak, 0) * 10
-        if streak >= 5:
-            base += 20
-        if streak >= 10:
-            base += 50
-        return base
-    expected_coins_for_existing_streak = minimum_coins_for_streak(existing_streak)
-    if existing_coins < expected_coins_for_existing_streak:
-        coins_earned += expected_coins_for_existing_streak - existing_coins
+
+    def coins_for_increment(prev_streak: int, next_streak: int) -> int:
+        """Reward 10 coins per streak day gained plus milestone bonuses."""
+        if next_streak <= prev_streak:
+            return 0
+        earned = (next_streak - prev_streak) * 10
+        thresholds = (
+            (5, 20),
+            (10, 50),
+            (20, 100),
+            (50, 300),
+        )
+        for threshold, bonus in thresholds:
+            if next_streak >= threshold and prev_streak < threshold:
+                earned += bonus
+        return earned
+
     if last_login_str:
         try:
             last_login_date = datetime.fromisoformat(last_login_str).date()
         except Exception:
             last_login_date = None
         if last_login_date:
-            delta_days = (today - last_login_date).days
+            delta_days = max((today - last_login_date).days, 0)
             if delta_days == 0:
                 new_streak = max(existing_streak, 1)
+                coins_earned = 0
             elif delta_days == 1:
                 new_streak = (existing_streak or 0) + 1
+                coins_earned = coins_for_increment(existing_streak, new_streak)
             else:
-                # Missed at least one full day: reset the streak to 1 for today.
+                # Missed at least one full day: reset the streak to 1 for today and award the daily login coins.
                 new_streak = 1
-    # award coins for streak increment
-    streak_increment = max(new_streak - existing_streak, 0)
-    if streak_increment:
-        coins_earned += streak_increment * 10
-        if new_streak >= 5 and existing_streak < 5:
-            coins_earned += 20
-        if new_streak >= 10 and existing_streak < 10:
-            coins_earned += 50
+                coins_earned = 10
+        else:
+            # Unparseable last_login: treat as a fresh login day.
+            new_streak = 1
+            coins_earned = 10
+    else:
+        # First recorded login: grant daily coins.
+        new_streak = max(existing_streak, 1)
+        coins_earned = 10 if existing_streak == 0 else 0
+
+    # Reset daily tasks if the date rolled over
+    if tasks_checked_off_date != today.isoformat():
+        tasks_checked_off_today = 0
+        db.execute(
+            "UPDATE users SET tasks_checked_off_today = 0, tasks_checked_off_date = ? WHERE id = ?;",
+            (today.isoformat(), user["id"])
+        )
+        db.commit()
+
     new_total_coins = existing_coins + coins_earned
-    update_user_login_meta(db, user["id"], new_streak, today.isoformat(), new_total_coins)
-    return {"id": user["id"], "username": user["username"], "login_streak": new_streak, "check_coins": new_total_coins}
+    new_best = max(best_streak, new_streak, 1)
+    update_user_login_meta(db, user["id"], new_streak, new_best, today.isoformat(), new_total_coins)
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "login_streak": new_streak,
+        "login_best": new_best,
+        "tasks_checked_off": tasks_checked_off,
+        "tasks_checked_off_today": tasks_checked_off_today,
+        "check_coins": new_total_coins,
+        "theme": user.get("theme") or "default",
+        "view": user.get("view") or "front",
+        "inventory": inventory,
+        "xp": user.get("xp") or 0,
+        "level": user.get("level") or 1,
+        "rank": rank_for_level(user.get("level") or 1)
+    }
 
 
 @app.post("/auth/update_username")
@@ -309,6 +387,37 @@ def update_password(payload: UpdatePasswordPayload, db=Depends(get_db)):
     if not updated:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update password")
     return {"id": payload.user_id, "username": user["username"]}
+
+
+@app.post("/store/purchase")
+def purchase_item(payload: PurchasePayload, db=Depends(get_db)):
+    user = fetch_user_by_id(db, payload.user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    item_key = (payload.item_key or "").strip()
+    if not item_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid item key")
+    price = max(int(payload.price), 0)
+    if price <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid price")
+    current_coins = user.get("check_coins") or 0
+    if current_coins < price:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not enough check coins")
+
+    new_balance = current_coins - price
+    inventory = parse_inventory(user.get("inventory"))
+    updated_inventory = list(dict.fromkeys([*inventory, item_key]))
+    inventory_json = json.dumps(updated_inventory)
+
+    updated = update_user_balance_and_inventory(db, user["id"], new_balance, inventory_json)
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update balance")
+
+    return {
+        "user_id": user["id"],
+        "check_coins": new_balance,
+        "inventory": updated_inventory
+    }
 
 
 def summarise_with_ai(todo_list):
@@ -498,7 +607,9 @@ def edit_a_todo(
     clean_deadline = parse_deadline(deadline)
 
     # Check if todo exists for user
-    ensure_user_todo(db, id, user_id)
+    existing_todo = ensure_user_todo(db, id, user_id)
+    previous_completed = bool(existing_todo.get("completed"))
+    updated_user_stats = None
 
     try:
         if text is not None:
@@ -516,12 +627,20 @@ def edit_a_todo(
                     detail="Failed to update deadline"
                 )
         if completed is not None:
+            if previous_completed and completed is False:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Completed tasks cannot be unchecked"
+                )
+            should_increment_task_counter = (completed is True) and (previous_completed is False)
             completed_success = update_todo_completed(db, id, completed)
             if not completed_success:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to update completion"
                 )
+            if should_increment_task_counter:
+                updated_user_stats = increment_tasks_checked_off(db, user_id, 1)
         if flags is not None:
             flags_success = update_todo_flags(db, id, flags)
             if not flags_success:
@@ -529,10 +648,14 @@ def edit_a_todo(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to update flags"
                 )
-        return {
+        response_body = {
             "edited": True,
             "message": f"Todo with id {id} updated successfully"
         }
+        if updated_user_stats:
+            # Return updated counters so the client can sync XP/level without an extra fetch.
+            response_body["user"] = updated_user_stats
+        return response_body
     except HTTPException:
         raise
     except Exception as e:
@@ -719,9 +842,19 @@ def alter_related(id: int, related_id: int = None, user_id: int | None = None, d
 
 
 @app.get('/settings')
-def get_settings(db=Depends(get_db)):
+def get_settings(user_id: int | None = None, db=Depends(get_db)):
     try:
-        return fetch_settings(db)
+        base_settings = fetch_settings(db)
+        if user_id is not None:
+            user = fetch_user_by_id(db, user_id)
+            if user is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User with id {user_id} not found")
+            theme = user.get("theme") or base_settings.get("theme") or "default"
+            view = user.get("view") or base_settings.get("view") or "front"
+            return {"theme": theme, "view": view, "selected_list_id": base_settings.get("selected_list_id")}
+        return base_settings
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -731,7 +864,7 @@ def get_settings(db=Depends(get_db)):
 
 @app.put('/settings')
 def set_settings(payload: SettingsPayload, db=Depends(get_db)):
-    allowed_themes = {"default", "cozy", "minimal", "space"}
+    allowed_themes = {"default", "cozy", "minimal", "space", "royalGarden", "beachDay", "football"}
     allowed_views = {"front", "lists", "detail"}
     if payload.theme not in allowed_themes:
         raise HTTPException(
@@ -743,7 +876,28 @@ def set_settings(payload: SettingsPayload, db=Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid view"
         )
-    if payload.selected_list_id is not None and fetch_list(db, payload.selected_list_id) is None:
+    if payload.selected_list_id is not None:
+        owner_id = payload.user_id if payload.user_id is not None else None
+        if fetch_list(db, payload.selected_list_id, owner_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"List with id {payload.selected_list_id} not found"
+            )
+    if payload.user_id is not None and fetch_user_by_id(db, payload.user_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with id {payload.user_id} not found"
+        )
+    try:
+        update_settings(db, payload.theme, payload.view, payload.selected_list_id)
+        if payload.user_id is not None:
+            update_user_theme_view(db, payload.user_id, payload.theme, payload.view)
+        return {"theme": payload.theme, "view": payload.view, "selected_list_id": payload.selected_list_id}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save settings: {str(e)}"
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"List with id {payload.selected_list_id} not found"
