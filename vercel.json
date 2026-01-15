@@ -4,6 +4,7 @@
   "buildCommand": "cd front_end && npm install && npm run build",
   "outputDirectory": "front_end/dist",
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api" }
+    { "source": "/api/(.*)", "destination": "/api/index.py" },
+    { "source": "/docs", "destination": "/api/docs" }
   ]
 }
