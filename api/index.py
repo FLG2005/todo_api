@@ -8,7 +8,7 @@ from fastapi.responses import PlainTextResponse
 from openai import OpenAI
 from pydantic import BaseModel
 from datetime import datetime
-from database import (
+from api.database import (
     connect,
     create_table,
     create_settings_table,
